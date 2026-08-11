@@ -9,6 +9,9 @@ import { Octokit } from "@octokit/rest";
 import { AsyncLocalStorage } from "async_hooks";
 import { ElectronPlatformAdapter, CloudPlatformAdapter, PlatformAdapter, UserConfig as AppConfig } from "./platform";
 import crypto from "crypto";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { createServerInstance } from "./src/lib/mcp/server";
+import { createMcpKey, getMcpKeyInfo } from "./src/lib/firebaseStore";
 
 dotenv.config();
 
@@ -560,6 +563,47 @@ app.get("/api/health", (_req, res) => {
 });
 
 app.use("/api", multiTenantMiddleware);
+
+const sseTransports = new Map<string, SSEServerTransport>();
+
+app.post("/api/mcp/generate-link", async (req, res) => {
+  const { storageType } = req.body;
+  const userId = (req as any).userId;
+  if (!userId || userId === "anonymous") return res.status(401).json({ error: "Unauthorized" });
+  if (!storageType) return res.status(400).json({ error: "storageType required" });
+  try {
+    const key = await createMcpKey(userId, storageType);
+    const domain = req.protocol + "://" + req.get("host");
+    res.json({ url: `${domain}/api/mcp/sse?key=${key}` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/mcp/sse", async (req, res) => {
+  const key = req.query.key as string;
+  if (!key) return res.status(401).send("API Key required");
+  
+  const keyInfo = await getMcpKeyInfo(key);
+  if (!keyInfo) return res.status(401).send("Invalid API Key");
+
+  console.log(`[MCP] New SSE Connection for key: ${key}`);
+  const transport = new SSEServerTransport("/api/mcp/message?key=" + key, res);
+  sseTransports.set(key, transport);
+  
+  const server = createServerInstance();
+  await server.connect(transport);
+});
+
+app.post("/api/mcp/message", async (req, res) => {
+  const key = req.query.key as string;
+  if (!key) return res.status(401).send("API Key required");
+  
+  const transport = sseTransports.get(key);
+  if (!transport) return res.status(404).send("Transport not found");
+
+  await transport.handlePostMessage(req, res);
+});
 
 // In-memory context store for MCP server
 let mcpMemories: any[] = [

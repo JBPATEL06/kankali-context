@@ -10,7 +10,7 @@ export function isTokenExpired(tokenMetadata: { accessToken: string; expiresAt?:
     : tokenMetadata.expiresAt;
     
   const nowMs = Date.now();
-  const bufferMs = 5 * 60 * 1000; // 5-minute buffer
+  const bufferMs = 2 * 60 * 1000; // 2-minute buffer
   
   return nowMs >= (expiresAtMs - bufferMs);
 }

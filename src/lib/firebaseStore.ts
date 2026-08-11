@@ -41,9 +41,11 @@ export async function saveUserConfigToFirestore(
 
   // Always sync local storage cache first
   try {
-    const existingRaw = localStorage.getItem(cacheKey);
-    const existing = existingRaw ? JSON.parse(existingRaw) : {};
-    localStorage.setItem(cacheKey, JSON.stringify({ ...existing, ...payload }));
+    if (typeof localStorage !== 'undefined') {
+      const existingRaw = localStorage.getItem(cacheKey);
+      const existing = existingRaw ? JSON.parse(existingRaw) : {};
+      localStorage.setItem(cacheKey, JSON.stringify({ ...existing, ...payload }));
+    }
   } catch (e) {
     // Ignore storage quota errors
   }
@@ -69,7 +71,9 @@ export async function getUserConfigFromFirestore(userId: string): Promise<UserFi
     if (snap.exists()) {
       const data = snap.data() as UserFirebaseConfig;
       try {
-        localStorage.setItem(cacheKey, JSON.stringify(data));
+        if (typeof localStorage !== 'undefined') {
+          localStorage.setItem(cacheKey, JSON.stringify(data));
+        }
       } catch (e) {}
       return data;
     }
@@ -79,9 +83,11 @@ export async function getUserConfigFromFirestore(userId: string): Promise<UserFi
 
   // Fallback to local storage if Firestore is offline
   try {
-    const localRaw = localStorage.getItem(cacheKey);
-    if (localRaw) {
-      return JSON.parse(localRaw) as UserFirebaseConfig;
+    if (typeof localStorage !== 'undefined') {
+      const localRaw = localStorage.getItem(cacheKey);
+      if (localRaw) {
+        return JSON.parse(localRaw) as UserFirebaseConfig;
+      }
     }
   } catch (e) {}
 
@@ -128,4 +134,61 @@ export async function saveGoogleDriveAuthToFirestore(
   });
 
   return { tokenExpiresAt };
+}
+
+/**
+ * Removes Google Drive tokens when expired
+ */
+export async function clearGoogleToken(userId: string): Promise<void> {
+  const userRef = doc(db, 'users', userId);
+  await updateDoc(userRef, {
+    googleAccessToken: null,
+    googleTokenExpiresAt: null,
+    googleTokenObtainedAt: null
+  } as any);
+}
+
+/**
+ * Removes GitHub token when expired
+ */
+export async function clearGithubToken(userId: string): Promise<void> {
+  const userRef = doc(db, 'users', userId);
+  await updateDoc(userRef, {
+    githubToken: null,
+    githubTokenExpiresAt: null
+  } as any);
+}
+
+/**
+ * Creates a unique MCP API Key for a user's AI connector.
+ */
+export async function createMcpKey(userId: string, storageType: string): Promise<string> {
+  // Generate random 24-character key
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let key = 'mcp_';
+  for (let i = 0; i < 20; i++) {
+    key += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  
+  const keyRef = doc(db, 'mcp_keys', key);
+  await setDoc(keyRef, {
+    userId,
+    storageType,
+    createdAt: new Date().toISOString()
+  });
+  
+  return key;
+}
+
+/**
+ * Validates and retrieves the User ID and Storage Type for an MCP API Key.
+ */
+export async function getMcpKeyInfo(key: string): Promise<{ userId: string; storageType: string } | null> {
+  if (!key) return null;
+  const keyRef = doc(db, 'mcp_keys', key);
+  const snap = await getDoc(keyRef);
+  if (snap.exists()) {
+    return snap.data() as { userId: string; storageType: string };
+  }
+  return null;
 }

@@ -97,6 +97,48 @@ export class DriveAdapter {
   }
 
   /**
+   * Reads a file as raw text from the Google Drive appDataFolder.
+   */
+  async read_file_as_text(fileName: string): Promise<string | null> {
+    try {
+      const fileId = await this.getFileId(fileName);
+      if (!fileId) return null;
+      
+      const res = await this.drive.files.get({ fileId: fileId, alt: 'media' });
+      return typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
+    } catch (error) {
+      console.error(`Failed to read file ${fileName} as text from appDataFolder:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Writes raw text to a file in the Google Drive appDataFolder.
+   */
+  async write_file_as_text(fileName: string, content: string): Promise<string> {
+    const fileMetadata = { name: fileName, parents: ['appDataFolder'] };
+    const media = { mimeType: 'text/markdown', body: content };
+
+    try {
+      const existingFileId = await this.getFileId(fileName);
+      if (existingFileId) {
+        const res = await this.drive.files.update({
+          fileId: existingFileId, requestBody: {}, media: media, fields: 'id'
+        });
+        return res.data.id as string;
+      } else {
+        const res = await this.drive.files.create({
+          requestBody: fileMetadata, media: media, fields: 'id'
+        });
+        return res.data.id as string;
+      }
+    } catch (error) {
+      console.error(`Failed to write file ${fileName} as text to appDataFolder:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Helper to find an existing file by name in the appDataFolder
    */
   private async getFileId(fileName: string): Promise<string | null> {

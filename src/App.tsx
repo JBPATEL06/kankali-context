@@ -50,6 +50,7 @@ export default function App() {
           email: session.email || '',
           displayName: session.displayName || '',
           googleAccessToken: session.accessToken,
+          googleTokenExpiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
         }).catch(e => console.warn('Failed to save session to Firestore:', e));
       }
     } else {
@@ -135,7 +136,12 @@ export default function App() {
       const tokenCheck = await validateGoogleDriveToken(userSession.accessToken);
       if (!tokenCheck.valid) {
         setTokenExpiredWarning(true);
-        setDriveSaveError('Google Auth Token expired. Please re-authenticate to sync and access Drive.');
+        // Distinguish between actual expiration and 403 permissions/API issues
+        if (tokenCheck.error?.includes('403') || tokenCheck.error?.includes('400')) {
+          setDriveSaveError(`Google Drive Permission Error: ${tokenCheck.error}. Did you enable the Drive API in Google Cloud and check the permissions box during login?`);
+        } else {
+          setDriveSaveError('Google Auth Token expired. Please re-authenticate to sync and access Drive.');
+        }
         return;
       }
       setTokenExpiredWarning(false);
