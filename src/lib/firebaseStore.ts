@@ -1,7 +1,19 @@
 import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import firebaseConfig from '../../firebase-applet-config.json';
+import admin from 'firebase-admin';
 
+import { initializeApp as initAdminApp, getApps as getAdminApps, applicationDefault } from 'firebase-admin/app';
+import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
+
+function getAdminDb() {
+  if (!getAdminApps().length) {
+    initAdminApp({
+      credential: applicationDefault(),
+    });
+  }
+  return getAdminFirestore();
+}
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
 
@@ -75,7 +87,7 @@ export async function getUserConfigFromFirestore(userId: string): Promise<UserFi
         if (typeof localStorage !== 'undefined') {
           localStorage.setItem(cacheKey, JSON.stringify(data));
         }
-      } catch (e) {}
+      } catch (e) { }
       return data;
     }
   } catch (error: any) {
@@ -90,7 +102,7 @@ export async function getUserConfigFromFirestore(userId: string): Promise<UserFi
         return JSON.parse(localRaw) as UserFirebaseConfig;
       }
     }
-  } catch (e) {}
+  } catch (e) { }
 
   return null;
 }
@@ -171,32 +183,28 @@ export async function clearGithubToken(userId: string): Promise<void> {
  * Creates a unique MCP API Key for a user's AI connector.
  */
 export async function createMcpKey(userId: string, storageType: string): Promise<string> {
-  // Generate random 24-character key
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
   let key = 'mcp_';
   for (let i = 0; i < 20; i++) {
     key += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  
-  const keyRef = doc(db, 'mcp_keys', key);
-  await setDoc(keyRef, {
+
+  await getAdminDb().collection('mcp_keys').doc(key).set({
     userId,
     storageType,
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
   });
-  
+
   return key;
 }
-
 /**
  * Validates and retrieves the User ID and Storage Type for an MCP API Key.
  */
-export async function getMcpKeyInfo(key: string): Promise<{ userId: string; storageType: string } | null> {
+export async function getMcpKeyInfo(
+  key: string
+): Promise<{ userId: string; storageType: string } | null> {
   if (!key) return null;
-  const keyRef = doc(db, 'mcp_keys', key);
-  const snap = await getDoc(keyRef);
-  if (snap.exists()) {
-    return snap.data() as { userId: string; storageType: string };
-  }
-  return null;
+  const snap = await getAdminDb().collection('mcp_keys').doc(key).get();
+  if (!snap.exists) return null;
+  return snap.data() as { userId: string; storageType: string };
 }
