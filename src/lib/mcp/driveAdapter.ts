@@ -8,27 +8,33 @@ export class DriveAdapter {
   private drive;
 
   /**
-   * Initializes the adapter with a valid OAuth2 access token.
-   * Ensure the token has the 'https://www.googleapis.com/auth/drive.appdata' scope.
+   * Initializes the adapter with a Google OAuth token.
+   * Prefer access_token for short-lived sessions; pass isRefreshToken=true when using a refresh_token.
+   * Requires scope: https://www.googleapis.com/auth/drive.appdata
    */
-  constructor(userRefreshToken: string) {
+  constructor(token: string, options?: { isRefreshToken?: boolean }) {
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
 
-    if (!clientId || !clientSecret) {
-      throw new Error("Server configuration error: GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET missing in environment variables.");
+    const auth = new google.auth.OAuth2(clientId || undefined, clientSecret || undefined);
+
+    if (options?.isRefreshToken) {
+      if (!clientId || !clientSecret) {
+        throw new Error(
+          'Server configuration error: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are required when using a refresh_token.'
+        );
+      }
+      auth.setCredentials({ refresh_token: token });
+    } else {
+      // Primary path: use the access token saved from Google Sign-In
+      auth.setCredentials({ access_token: token });
     }
 
-    const auth = new google.auth.OAuth2(clientId, clientSecret);
-    auth.setCredentials({ refresh_token: userRefreshToken });
     this.drive = google.drive({ version: 'v3', auth });
   }
 
   /**
    * Saves or updates a session payload in the Google Drive appDataFolder.
-   * 
-   * @param session_id Unique identifier for the session, used as the filename (e.g., session_id.json)
-   * @param payload The dictionary/object containing context data
    */
   async save_to_appdata(session_id: string, payload: Record<string, any>): Promise<string> {
     const fileName = `${session_id}.json`;
@@ -43,11 +49,9 @@ export class DriveAdapter {
     };
 
     try {
-      // Check if file already exists
       const existingFileId = await this.getFileId(fileName);
 
       if (existingFileId) {
-        // Update existing file
         const res = await this.drive.files.update({
           fileId: existingFileId,
           requestBody: {},
@@ -56,7 +60,6 @@ export class DriveAdapter {
         });
         return res.data.id as string;
       } else {
-        // Create new file
         const res = await this.drive.files.create({
           requestBody: fileMetadata,
           media: media,
@@ -72,16 +75,13 @@ export class DriveAdapter {
 
   /**
    * Reads a session payload from the Google Drive appDataFolder.
-   * 
-   * @param session_id Unique identifier for the session
-   * @returns The parsed JSON payload, or null if not found
    */
   async read_from_appdata(session_id: string): Promise<Record<string, any> | null> {
     const fileName = `${session_id}.json`;
     try {
       const fileId = await this.getFileId(fileName);
       if (!fileId) {
-        return null; // File doesn't exist yet
+        return null;
       }
 
       const res = await this.drive.files.get({
@@ -138,9 +138,6 @@ export class DriveAdapter {
     }
   }
 
-  /**
-   * Helper to find an existing file by name in the appDataFolder
-   */
   private async getFileId(fileName: string): Promise<string | null> {
     const res = await this.drive.files.list({
       spaces: 'appDataFolder',

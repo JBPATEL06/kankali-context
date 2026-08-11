@@ -10,6 +10,7 @@ export interface UserFirebaseConfig {
   email: string;
   displayName?: string;
   googleAccessToken?: string;
+  googleRefreshToken?: string;
   googleTokenExpiresAt?: string;
   googleTokenObtainedAt?: string;
   mcpStorageMode?: 'drive' | 'github' | 'ask_user' | 'single_url' | 'url';
@@ -122,16 +123,22 @@ export async function saveGithubDataToFirestore(
 export async function saveGoogleDriveAuthToFirestore(
   userId: string,
   accessToken: string,
-  expiresInSeconds = 3600
+  expiresInSeconds = 3600,
+  refreshToken?: string
 ): Promise<{ tokenExpiresAt: string }> {
   const obtainedAt = new Date().toISOString();
   const tokenExpiresAt = new Date(Date.now() + expiresInSeconds * 1000).toISOString();
 
-  await saveUserConfigToFirestore(userId, {
+  const payload: Partial<UserFirebaseConfig> = {
     googleAccessToken: accessToken,
     googleTokenObtainedAt: obtainedAt,
     googleTokenExpiresAt: tokenExpiresAt,
-  });
+  };
+  if (refreshToken) {
+    payload.googleRefreshToken = refreshToken;
+  }
+
+  await saveUserConfigToFirestore(userId, payload);
 
   return { tokenExpiresAt };
 }
@@ -143,6 +150,7 @@ export async function clearGoogleToken(userId: string): Promise<void> {
   const userRef = doc(db, 'users', userId);
   await updateDoc(userRef, {
     googleAccessToken: null,
+    googleRefreshToken: null,
     googleTokenExpiresAt: null,
     googleTokenObtainedAt: null
   } as any);
