@@ -225,7 +225,10 @@ export async function handleBookStyleToolCall(
       try {
         token = platform.decryptSecret(userConfig.encryptedGithubToken);
       } catch (err: any) {
-        console.error('Failed to decrypt GitHub token:', err.message);
+        throw new McpError(
+          ErrorCode.InvalidRequest,
+          'GitHub token could not be decrypted. Please re-link your GitHub account.'
+        );
       }
     }
 

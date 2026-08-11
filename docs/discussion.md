@@ -62,3 +62,25 @@
 
 **Open questions / follow-ups:**
 - Proceed with UI component synchronization (`DriveExplorer.tsx` and `ClaudeMcpHub.tsx`) in next milestone.
+
+## [2026-08-11] Closed Verification Gaps & Enhanced Read-Back Safety
+
+**What was discussed:**
+- Closed verification gaps and fail-safe token handling deficiencies identified during follow-up review.
+- Added mandatory read-back verification to `GitHubAdapter.write_file` and `GitHubAdapter.delete_file`.
+- Eliminated silent token-decryption fallbacks in `server.ts` (`getGithubClient`) and `platform.ts` (`ElectronPlatformAdapter.decryptSecret`).
+- Expanded test suite with `index.md` auto-sync assertions, complete GitHub CRUD with read-back verification, and error-path coverage.
+
+**Decisions made:**
+- `GitHubAdapter` now performs 3-attempt read-back verification before returning success on write, and verifies deletion on delete.
+- Token decryption failures now explicitly throw actionable error messages prompting re-authentication instead of passing raw ciphertext.
+
+**Changes made to code/project:**
+- `server.ts`: Fixed `getGithubClient` to throw on decryption failure. Guarded `startServer()` against non-main entrypoint execution.
+- `platform.ts`: Fixed `ElectronPlatformAdapter.decryptSecret` to throw on corrupt ciphertext.
+- `src/lib/mcp/githubAdapter.ts`: Added read-back verification on `write_file` and `delete_file`.
+- `src/lib/mcp/tools/bookStyleTools.ts`: Added explicit `McpError` on decryption failure.
+- `src/scripts/testBookStyleMcp.ts`: Expanded to 9 test suites covering all CRUD, auto-sync, read-back failure detection, and error paths.
+
+**Open questions / follow-ups:**
+- All 9 test suites passing. Proceed to UI visualization in next milestone.

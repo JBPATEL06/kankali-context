@@ -101,20 +101,24 @@ function getLinkedGithubDetails() {
   return { owner, repo, branch };
 }
 
-function getGithubClient(): Octokit {
-  const rawToken = config.encryptedGithubToken || config.githubToken;
+export function getGithubClient(overrideConfig?: AppConfig): Octokit {
+  const cfg = overrideConfig || config;
+  const rawToken = cfg.encryptedGithubToken || cfg.githubToken;
   if (!rawToken) {
     throw new Error("No linked GitHub account found. Please link your account first in the Kankali Context Hub UI.");
   }
   let token = "";
-  if (config.encryptedGithubToken) {
+  if (cfg.encryptedGithubToken) {
     try {
-      token = decryptToken(config.encryptedGithubToken);
-    } catch {
-      token = config.encryptedGithubToken;
+      token = decryptToken(cfg.encryptedGithubToken);
+    } catch (err: any) {
+      throw new Error("GitHub token could not be decrypted. Please re-link your GitHub account.");
     }
   } else {
-    token = config.githubToken || "";
+    token = cfg.githubToken || "";
+  }
+  if (!token) {
+    throw new Error("No linked GitHub account found. Please link your account first in the Kankali Context Hub UI.");
   }
   return new Octokit({ auth: token });
 }
@@ -3496,7 +3500,12 @@ async function startServer() {
   });
 }
 
-console.log(`[Boot Check] NODE_ENV: ${process.env.NODE_ENV}, KANKALI_TEST: ${process.env.KANKALI_TEST}`);
-if (process.env.NODE_ENV !== "test" && process.env.KANKALI_TEST !== "true") {
+const isMainEntrypoint = process.argv[1] && (
+  process.argv[1].endsWith('server.ts') || 
+  process.argv[1].endsWith('server.cjs') || 
+  process.argv[1].endsWith('server.js')
+);
+
+if (isMainEntrypoint && process.env.NODE_ENV !== "test" && process.env.KANKALI_TEST !== "true") {
   startServer();
 }

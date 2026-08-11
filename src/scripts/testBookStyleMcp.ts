@@ -1,7 +1,12 @@
+process.env.KANKALI_TEST = 'true';
+process.env.NODE_ENV = 'test';
+
 import { getBookStyleToolDefinitions, handleBookStyleToolCall } from '../lib/mcp/tools/bookStyleTools';
 import { isTokenExpired } from '../lib/mcp/authGuard';
 import { ElectronPlatformAdapter } from '../../platform';
 import { DriveAdapter } from '../lib/mcp/driveAdapter';
+import { GitHubAdapter } from '../lib/mcp/githubAdapter';
+import { getGithubClient, platform as serverPlatform } from '../../server';
 import { Readable } from 'stream';
 
 // ANSI color helpers
@@ -140,6 +145,117 @@ function createMockDriveClient() {
   };
 }
 
+/**
+ * Creates a mock Octokit GitHub REST client to test GitHubAdapter with real method logic and read-back verification.
+ */
+function createMockGitHubClient(options: { failReadBack?: boolean } = {}) {
+  interface MockGitFile {
+    sha: string;
+    path: string;
+    name: string;
+    content: string;
+  }
+
+  const repoFiles = new Map<string, MockGitFile>();
+  let commitCount = 1;
+
+  return {
+    repos: {
+      getContent: async (params: any) => {
+        const cleanPath = (params.path || '').trim().replace(/^\/+/g, '');
+        if (!cleanPath) {
+          // List root
+          const list = Array.from(repoFiles.values()).map((f) => ({
+            name: f.name,
+            path: f.path,
+            sha: f.sha,
+            size: Buffer.byteLength(f.content, 'utf8'),
+            type: 'file',
+            html_url: `https://github.com/test/${f.path}`,
+          }));
+          return { data: list };
+        }
+
+        const file = repoFiles.get(cleanPath);
+        if (file) {
+          return {
+            data: {
+              type: 'file',
+              name: file.name,
+              path: file.path,
+              sha: file.sha,
+              size: Buffer.byteLength(file.content, 'utf8'),
+              content: Buffer.from(file.content, 'utf8').toString('base64'),
+              html_url: `https://github.com/test/${file.path}`,
+            },
+          };
+        }
+
+        // Check if directory
+        const dirFiles = Array.from(repoFiles.values()).filter((f) => f.path.startsWith(`${cleanPath}/`));
+        if (dirFiles.length > 0) {
+          const list = dirFiles.map((f) => ({
+            name: f.name,
+            path: f.path,
+            sha: f.sha,
+            size: Buffer.byteLength(f.content, 'utf8'),
+            type: 'file',
+            html_url: `https://github.com/test/${f.path}`,
+          }));
+          return { data: list };
+        }
+
+        const error: any = new Error(`Not Found: ${cleanPath}`);
+        error.status = 404;
+        throw error;
+      },
+
+      createOrUpdateFileContents: async (params: any) => {
+        const cleanPath = (params.path || '').trim().replace(/^\/+/g, '');
+        const fileName = cleanPath.split('/').pop() || cleanPath;
+        let content = Buffer.from(params.content, 'base64').toString('utf8');
+
+        if (options.failReadBack) {
+          // Corrupt content on readback to trigger verification failure
+          content = 'CORRUPTED_CONTENT_MISMATCH';
+        }
+
+        const sha = `git_sha_${commitCount++}`;
+        const fileObj: MockGitFile = {
+          sha,
+          path: cleanPath,
+          name: fileName,
+          content,
+        };
+        repoFiles.set(cleanPath, fileObj);
+
+        return {
+          data: {
+            commit: { sha },
+            content: {
+              sha,
+              html_url: `https://github.com/test/${cleanPath}`,
+            },
+          },
+        };
+      },
+
+      deleteFile: async (params: any) => {
+        const cleanPath = (params.path || '').trim().replace(/^\/+/g, '');
+        const exists = repoFiles.has(cleanPath);
+        if (!exists) {
+          const error: any = new Error(`Not Found: ${cleanPath}`);
+          error.status = 404;
+          throw error;
+        }
+        repoFiles.delete(cleanPath);
+        const sha = `delete_sha_${commitCount++}`;
+        return { data: { commit: { sha } } };
+      },
+    },
+  };
+}
+
 async function runTests() {
   console.log(bold(cyan('\n========================================')));
   console.log(bold(cyan('  Kankali Book-Style Context Test Suite ')));
@@ -236,10 +352,9 @@ async function runTests() {
   }
   assert(mismatchCaught, 'Version mismatch threw explicit McpError');
 
-  // --- 5. DriveAdapter End-to-End File & Folder CRUD with commit.md & Read-Back Verification ---
-  console.log(bold('\n5. Testing DriveAdapter End-to-End CRUD with commit.md & Read-Back Verification'));
+  // --- 5. DriveAdapter End-to-End File & Folder CRUD with commit.md & index.md Auto-Sync ---
+  console.log(bold('\n5. Testing DriveAdapter End-to-End CRUD with commit.md & index.md Auto-Sync'));
   const driveAdapter = new DriveAdapter('mock-test-refresh-token');
-  // Inject mock drive client
   (driveAdapter as any).drive = createMockDriveClient();
 
   // Test 5.1: Create folder
@@ -247,7 +362,7 @@ async function runTests() {
   const folderItem = await driveAdapter.create_folder('/architecture', 'claude-3-7-sonnet');
   assert(folderItem.path === '/architecture', 'create_folder returned valid folder item');
 
-  // Test 5.2: Write file with read-back verification and automated commit.md ledger
+  // Test 5.2: Write file with read-back verification and automated commit.md & index.md ledger
   console.log('Testing write_file(/architecture/tech-stack.md)...');
   const techStackDoc = `# Tech Stack\n\n- TypeScript 5.8\n- Express 4.x\n- Model Context Protocol\n`;
   const fileItem = await driveAdapter.write_file(
@@ -270,13 +385,19 @@ async function runTests() {
   assert(commitRes.content.includes('Added architecture tech-stack documentation'), 'commit.md contains commit summary');
   assert(commitRes.content.includes('claude-3-7-sonnet'), 'commit.md contains author identity');
 
-  // Test 5.5: List folder
+  // Test 5.5: Verify index.md auto-sync on creation
+  console.log('Testing index.md auto-sync on file creation...');
+  const indexRes1 = await driveAdapter.read_file('index.md');
+  assert(indexRes1.content.includes('/architecture/tech-stack.md'), 'index.md contains newly written file path');
+
+  // Test 5.6: List folder
   console.log('Testing list_folder(/)...');
   const rootListing = await driveAdapter.list_folder('/');
   assert(rootListing.folders.some((f) => f.name === 'architecture'), 'Root listing contains architecture folder');
   assert(rootListing.files.some((f) => f.name === 'commit.md'), 'Root listing contains commit.md');
+  assert(rootListing.files.some((f) => f.name === 'index.md'), 'Root listing contains index.md');
 
-  // Test 5.6: Delete file
+  // Test 5.7: Delete file and verify index.md auto-sync on deletion
   console.log('Testing delete_file(/architecture/tech-stack.md)...');
   const deleteRes = await driveAdapter.delete_file('/architecture/tech-stack.md', 'Removed obsolete doc', 'claude-3-7-sonnet');
   assert(deleteRes.success, 'delete_file reported success');
@@ -289,6 +410,11 @@ async function runTests() {
     fileNotFound = true;
   }
   assert(fileNotFound, 'Deleted file correctly throws 404 on subsequent read');
+
+  // Verify index.md reflects deletion
+  console.log('Testing index.md auto-sync on file deletion...');
+  const indexRes2 = await driveAdapter.read_file('index.md');
+  assert(!indexRes2.content.includes('/architecture/tech-stack.md'), 'index.md reflects file removal');
 
   // --- 6. Auth Expiration Guard Test ---
   console.log(bold('\n6. Testing Token Expiration Safety Buffer'));
@@ -308,7 +434,148 @@ async function runTests() {
   const decrypted = platform.decryptSecret(encrypted);
   assert(decrypted === secretString, 'AES-256-GCM encryption & decryption verified isomorphic');
 
-  console.log(bold(green('\n✔ All Book-Style MCP Unit & End-to-End Tests Passed Successfully!\n')));
+  // --- 8. GitHubAdapter End-to-End CRUD & Read-Back Verification Test ---
+  console.log(bold('\n8. Testing GitHubAdapter End-to-End CRUD with Read-Back Verification'));
+  const ghAdapter = new GitHubAdapter('test-token', 'test-owner', 'test-repo', 'main');
+  (ghAdapter as any).octokit = createMockGitHubClient();
+
+  // Test 8.1: Write file with read-back verification
+  console.log('Testing GitHubAdapter.write_file(/docs/overview.md)...');
+  const ghOverviewContent = `# Project Overview\n\nBook-Style context synchronized with GitHub repo.\n`;
+  const ghFileItem = await ghAdapter.write_file('/docs/overview.md', ghOverviewContent, 'feat: add project overview');
+  assert(ghFileItem.path === '/docs/overview.md', 'GitHub write_file returned file with correct path');
+  assert(!!ghFileItem.sha, 'GitHub write_file returned valid commit SHA');
+
+  // Test 8.2: Read file
+  console.log('Testing GitHubAdapter.read_file(/docs/overview.md)...');
+  const ghReadRes = await ghAdapter.read_file('/docs/overview.md');
+  assert(ghReadRes.content === ghOverviewContent, 'GitHub read_file content matches written content');
+
+  // Test 8.3: List folder
+  console.log('Testing GitHubAdapter.list_folder(/docs)...');
+  const ghListRes = await ghAdapter.list_folder('/docs');
+  assert(ghListRes.files.some((f) => f.name === 'overview.md'), 'GitHub list_folder includes overview.md');
+
+  // Test 8.4: Delete file
+  console.log('Testing GitHubAdapter.delete_file(/docs/overview.md)...');
+  const ghDeleteRes = await ghAdapter.delete_file('/docs/overview.md', 'chore: remove overview');
+  assert(ghDeleteRes.success, 'GitHub delete_file reported success');
+
+  // Verify deleted file throws 404
+  let ghDeletedNotFound = false;
+  try {
+    await ghAdapter.read_file('/docs/overview.md');
+  } catch (err: any) {
+    ghDeletedNotFound = true;
+  }
+  assert(ghDeletedNotFound, 'GitHub read_file on deleted file throws 404');
+
+  // Test 8.5: Read-Back Verification Failure Detection
+  console.log('Testing GitHubAdapter Read-Back Verification Failure Detection...');
+  const failingGhAdapter = new GitHubAdapter('test-token', 'test-owner', 'test-repo', 'main');
+  (failingGhAdapter as any).octokit = createMockGitHubClient({ failReadBack: true });
+
+  let readBackFailureCaught = false;
+  try {
+    await failingGhAdapter.write_file('/bad-file.md', 'expected content', 'commit');
+  } catch (err: any) {
+    readBackFailureCaught = true;
+    assert(err.message.includes('Read-back verification failed'), `Caught expected read-back verification failure: ${err.message}`);
+  }
+  assert(readBackFailureCaught, 'GitHub write_file rejected mismatch with explicit Read-back verification error');
+
+  // --- 9. Error Paths & Fail-Safe Token Handling Test ---
+  console.log(bold('\n9. Testing Error Paths & Fail-Safe Token Handling'));
+
+  // Test 9.1: Invalid path / file not found on Drive
+  let drive404Caught = false;
+  try {
+    await driveAdapter.read_file('/nonexistent-file.md');
+  } catch (err: any) {
+    drive404Caught = true;
+    assert(err.message.includes('File not found'), `Drive nonexistent file throws explicit error: ${err.message}`);
+  }
+  assert(drive404Caught, 'Drive read_file on nonexistent path threw explicit error');
+
+  // Test 9.2: Invalid folder on Drive
+  let driveFolder404Caught = false;
+  try {
+    await driveAdapter.list_folder('/nonexistent-dir');
+  } catch (err: any) {
+    driveFolder404Caught = true;
+    assert(err.message.includes('Directory not found'), `Drive nonexistent folder throws explicit error: ${err.message}`);
+  }
+  assert(driveFolder404Caught, 'Drive list_folder on nonexistent path threw explicit error');
+
+  // Test 9.3: Missing GitHub auth when calling sync_to_github
+  let missingGithubAuthCaught = false;
+  try {
+    await handleBookStyleToolCall(
+      'sync_to_github',
+      { session_id: 'test_session', commit_message: 'test commit' },
+      { userId: 'guest', userConfig: {}, platform }
+    );
+  } catch (err: any) {
+    missingGithubAuthCaught = true;
+    assert(err.message.includes('GitHub is not connected'), `Missing GitHub credentials threw explicit error: ${err.message}`);
+  }
+  assert(missingGithubAuthCaught, 'Tool requiring GitHub auth threw explicit connection error');
+
+  // Test 9.4: Decryption failure in server.ts getGithubClient()
+  console.log('Testing getGithubClient() decryption failure handling...');
+  const mockFailingPlatform = {
+    decryptSecret: () => {
+      throw new Error('Corrupt ciphertext or invalid AES authTag');
+    },
+  };
+  
+  // Temporarily replace platform decrypt
+  const originalDecrypt = platform.decryptSecret;
+  const originalServerDecrypt = (serverPlatform as any)?.decryptSecret;
+  (platform as any).decryptSecret = mockFailingPlatform.decryptSecret;
+  if (serverPlatform) {
+    (serverPlatform as any).decryptSecret = mockFailingPlatform.decryptSecret;
+  }
+
+  let serverDecryptionFailureCaught = false;
+  try {
+    getGithubClient({
+      encryptedGithubToken: 'corrupted-ciphertext-hex:tag:payload',
+    });
+  } catch (err: any) {
+    serverDecryptionFailureCaught = true;
+    assert(err.message.includes('GitHub token could not be decrypted'), `getGithubClient threw explicit error on decryption failure: ${err.message}`);
+  }
+  assert(serverDecryptionFailureCaught, 'getGithubClient rejected corrupted ciphertext without fallback');
+
+  // Test 9.5: Decryption failure in bookStyleTools.ts
+  let mcpDecryptionFailureCaught = false;
+  try {
+    await handleBookStyleToolCall(
+      'write_file',
+      { path: '/test.md', content: 'test', storage: 'github' },
+      {
+        userId: 'test-user',
+        userConfig: {
+          encryptedGithubToken: 'corrupted-token',
+          linkedRepo: { owner: 'o', name: 'r' },
+        },
+        platform,
+      }
+    );
+  } catch (err: any) {
+    mcpDecryptionFailureCaught = true;
+    assert(err.message.includes('GitHub token could not be decrypted'), `bookStyleTools threw explicit error on decryption failure: ${err.message}`);
+  }
+  assert(mcpDecryptionFailureCaught, 'MCP handler rejected corrupted ciphertext without fallback');
+
+  // Restore platform decrypt
+  (platform as any).decryptSecret = originalDecrypt;
+  if (serverPlatform && originalServerDecrypt) {
+    (serverPlatform as any).decryptSecret = originalServerDecrypt;
+  }
+
+  console.log(bold(green('\n✔ All 9 Test Suites Passed Successfully with Full Verification Proof!\n')));
 }
 
 runTests().catch((err) => {

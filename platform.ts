@@ -80,22 +80,18 @@ export class ElectronPlatformAdapter implements PlatformAdapter {
       const buffer = Buffer.from(ciphertext, "base64");
       return this.safeStorage.decryptString(buffer);
     }
-    try {
-      const [ivHex, tagHex, encryptedHex] = ciphertext.split(":");
-      if (!ivHex || !tagHex || !encryptedHex) {
-        return Buffer.from(ciphertext, "base64").toString("utf8");
-      }
-      const key = crypto.createHash("sha256").update(process.env.KANKALI_ENCRYPTION_KEY || "kankali-default-local-secret-key").digest();
-      const iv = Buffer.from(ivHex, "hex");
-      const tag = Buffer.from(tagHex, "hex");
-      const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
-      decipher.setAuthTag(tag);
-      let decrypted = decipher.update(encryptedHex, "hex", "utf8");
-      decrypted += decipher.final("utf8");
-      return decrypted;
-    } catch {
-      return ciphertext;
+    const [ivHex, tagHex, encryptedHex] = ciphertext.split(":");
+    if (!ivHex || !tagHex || !encryptedHex) {
+      throw new Error("Invalid ciphertext format");
     }
+    const key = crypto.createHash("sha256").update(process.env.KANKALI_ENCRYPTION_KEY || "kankali-default-local-secret-key").digest();
+    const iv = Buffer.from(ivHex, "hex");
+    const tag = Buffer.from(tagHex, "hex");
+    const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+    decipher.setAuthTag(tag);
+    let decrypted = decipher.update(encryptedHex, "hex", "utf8");
+    decrypted += decipher.final("utf8");
+    return decrypted;
   }
 
   async getPort(): Promise<number> {

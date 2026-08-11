@@ -3,7 +3,8 @@ import { McpFileItem, McpFolderItem } from './types';
 
 /**
  * Isolated GitHub Adapter for Book-Style Context Storage.
- * Uses @octokit/rest to manipulate hierarchical files and directories on GitHub.
+ * Uses @octokit/rest to manipulate hierarchical files and directories on GitHub
+ * with MANDATORY READ-BACK VERIFICATION.
  */
 export class GitHubAdapter {
   private octokit: Octokit;
@@ -19,7 +20,7 @@ export class GitHubAdapter {
   }
 
   /**
-   * Commits and writes/updates a file in the GitHub repository.
+   * Commits and writes/updates a file in the GitHub repository with MANDATORY READ-BACK VERIFICATION.
    */
   async write_file(
     filePath: string,
@@ -66,6 +67,39 @@ export class GitHubAdapter {
         branch: this.branch,
       });
 
+      // 4. MANDATORY READ-BACK VERIFICATION (up to 3 retries with backoff)
+      let verified = false;
+      let readBackContent = '';
+
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const { data } = await this.octokit.repos.getContent({
+            owner: this.owner,
+            repo: this.repo,
+            path: cleanPath,
+            ref: this.branch,
+          });
+
+          if (!Array.isArray(data) && data.type === 'file' && data.content) {
+            readBackContent = typeof Buffer !== 'undefined'
+              ? Buffer.from(data.content, 'base64').toString('utf8')
+              : decodeURIComponent(escape(atob(data.content.replace(/\s/g, ''))));
+
+            if (readBackContent.trim() === content.trim()) {
+              verified = true;
+              break;
+            }
+          }
+        } catch (err) {
+          // Retry
+        }
+        await new Promise((r) => setTimeout(r, 200 * attempt));
+      }
+
+      if (!verified) {
+        throw new Error(`Read-back verification failed for '${filePath}' on GitHub. Content could not be confirmed.`);
+      }
+
       return {
         id: response.data.content?.sha || response.data.commit.sha,
         name: fileName,
@@ -77,6 +111,9 @@ export class GitHubAdapter {
         webViewLink: response.data.content?.html_url || undefined,
       };
     } catch (error: any) {
+      if (error.message && error.message.includes('Read-back verification failed')) {
+        throw error;
+      }
       console.error(`Failed to write file /${cleanPath} to GitHub ${this.owner}/${this.repo}:`, error);
       throw error;
     }
@@ -118,7 +155,9 @@ export class GitHubAdapter {
         },
       };
     } catch (error: any) {
-      console.error(`Failed to read file /${cleanPath} from GitHub:`, error);
+      if (error.status !== 404) {
+        console.error(`Failed to read file /${cleanPath} from GitHub:`, error);
+      }
       throw error;
     }
   }
@@ -175,7 +214,7 @@ export class GitHubAdapter {
   }
 
   /**
-   * Deletes a file from the GitHub repository.
+   * Deletes a file from the GitHub repository with READ-BACK VERIFICATION.
    */
   async delete_file(filePath: string, commitMessage: string): Promise<{ success: boolean; sha: string }> {
     const cleanPath = filePath.trim().replace(/^\/+/g, '');
@@ -201,11 +240,37 @@ export class GitHubAdapter {
         branch: this.branch,
       });
 
+      // Read-back verification for deletion (confirm file is gone)
+      let deletionVerified = false;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          await this.octokit.repos.getContent({
+            owner: this.owner,
+            repo: this.repo,
+            path: cleanPath,
+            ref: this.branch,
+          });
+        } catch (checkErr: any) {
+          if (checkErr.status === 404) {
+            deletionVerified = true;
+            break;
+          }
+        }
+        await new Promise((r) => setTimeout(r, 200 * attempt));
+      }
+
+      if (!deletionVerified) {
+        throw new Error(`Read-back deletion verification failed for '${filePath}' on GitHub. File still exists.`);
+      }
+
       return {
         success: true,
         sha: response.data.commit.sha as string,
       };
     } catch (error: any) {
+      if (error.message && error.message.includes('Read-back deletion verification failed')) {
+        throw error;
+      }
       console.error(`Failed to delete file /${cleanPath} on GitHub:`, error);
       throw error;
     }
