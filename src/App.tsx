@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { User } from 'firebase/auth';
 import { ShieldAlert, RefreshCw, X } from 'lucide-react';
-import {
-  initAuth,
+import { 
+  initAuth, 
   logout,
   googleSignIn,
   emailSignIn,
@@ -12,9 +12,9 @@ import {
 import { saveUserConfigToFirestore, getUserConfigFromFirestore } from './lib/firebaseStore';
 import { UserSession, ContextMemory, DriveFileItem, SyncState } from './types';
 import { INITIAL_CONTEXT_MEMORIES } from './lib/initialData';
-import {
-  syncContextMemoriesToDrive,
-  listDriveFiles,
+import { 
+  syncContextMemoriesToDrive, 
+  listDriveFiles, 
   getOrCreateContextHubFolder,
   uploadDriveFile,
   deleteDriveFile,
@@ -50,7 +50,6 @@ export default function App() {
           email: session.email || '',
           displayName: session.displayName || '',
           googleAccessToken: session.accessToken,
-          googleTokenExpiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
         }).catch(e => console.warn('Failed to save session to Firestore:', e));
       }
     } else {
@@ -61,7 +60,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
   const [isMobileOpen, setIsMobileOpen] = useState<boolean>(false);
-
+  
   // Context Memories State
   const [memories, setMemories] = useState<ContextMemory[]>(() => {
     try {
@@ -121,9 +120,9 @@ export default function App() {
   };
 
   // Load files from Google Drive
-  const refreshDrive = async () => {
+  const refreshDrive = async (isManual = false) => {
     if (!userSession?.accessToken) return;
-
+    
     // If the token is a JWT (contains dots), it's a Firebase ID token from Email login, not a Google Drive OAuth token.
     if (userSession.accessToken.split('.').length === 3) {
       setDriveSaveError('You are signed in with Email. Google Drive features require signing in with Google.');
@@ -136,12 +135,7 @@ export default function App() {
       const tokenCheck = await validateGoogleDriveToken(userSession.accessToken);
       if (!tokenCheck.valid) {
         setTokenExpiredWarning(true);
-        // Distinguish between actual expiration and 403 permissions/API issues
-        if (tokenCheck.error?.includes('403') || tokenCheck.error?.includes('400')) {
-          setDriveSaveError(`Google Drive Permission Error: ${tokenCheck.error}. Did you enable the Drive API in Google Cloud and check the permissions box during login?`);
-        } else {
-          setDriveSaveError('Google Auth Token expired. Please re-authenticate to sync and access Drive.');
-        }
+        setDriveSaveError('Google Auth Token expired. Please re-authenticate to sync and access Drive.');
         return;
       }
       setTokenExpiredWarning(false);
@@ -153,8 +147,12 @@ export default function App() {
       const folderUrl = `https://drive.google.com/drive/folders/${folderId}`;
       setDriveFolderUrl(folderUrl);
       localStorage.setItem('kankali_drive_folder_url', folderUrl);
-    } catch (err) {
-      handleDriveError(err, 'Failed to load Drive files');
+    } catch (err: any) {
+      if (isManual) {
+        handleDriveError(err, 'Failed to load Drive files');
+      } else {
+        console.warn('Background Drive refresh skipped/failed:', err);
+      }
     } finally {
       setIsDriveLoading(false);
     }
@@ -190,7 +188,7 @@ export default function App() {
       localStorage.setItem('kankali_last_synced_at', now);
       setSyncState('success');
       setTokenExpiredWarning(false);
-      await refreshDrive();
+      await refreshDrive(true);
     } catch (err) {
       handleDriveError(err, 'Drive Sync Failed');
     } finally {
@@ -215,7 +213,7 @@ export default function App() {
       const folderId = await getOrCreateContextHubFolder(userSession.accessToken);
       await uploadDriveFile(userSession.accessToken, folderId, fileName, mimeType, content);
       setTokenExpiredWarning(false);
-      await refreshDrive();
+      await refreshDrive(true);
     } catch (err) {
       handleDriveError(err, `Failed to upload '${fileName}' to Google Drive`);
       throw err;
@@ -230,7 +228,7 @@ export default function App() {
     setIsDriveLoading(true);
     try {
       await deleteDriveFile(userSession.accessToken, fileId);
-      await refreshDrive();
+      await refreshDrive(true);
     } catch (err) {
       handleDriveError(err, 'Failed to delete file from Google Drive');
     } finally {
@@ -330,7 +328,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-white text-slate-900 transition-colors flex font-sans relative">
-
+      
       {/* Sidebar Navigation */}
       <Sidebar
         activeTab={activeTab}
@@ -352,7 +350,7 @@ export default function App() {
 
       {/* Main Wrapper with Dynamic Left Padding for Sidebar */}
       <div className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ${isCollapsed ? 'md:pl-20' : 'md:pl-64'}`}>
-
+        
         {/* Navigation Header */}
         <Navbar
           activeTab={activeTab}
@@ -374,116 +372,109 @@ export default function App() {
 
         {/* Main Container */}
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-
-          {/* Drive Auth & Validation Alert Banner */}
-          {driveSaveError && (
-            <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl backdrop-blur-md">
-              <div className="flex items-start gap-3">
-                <ShieldAlert className="w-5 h-5 text-amber-400 mt-0.5 shrink-0 animate-pulse" />
-                <div>
-                  <h4 className="text-sm font-bold text-amber-300 font-serif">Google Drive Save & Auth Validator Alert</h4>
-                  <p className="text-xs text-amber-200/90 mt-0.5 leading-relaxed">{driveSaveError}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {tokenExpiredWarning && (
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await handleGoogleLogin();
-                      setTokenExpiredWarning(false);
-                      setDriveSaveError(null);
-                      refreshDrive();
-                    }}
-                    className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition-colors shadow-md flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Re-Authenticate with Google</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDriveSaveError(null);
-                    setTokenExpiredWarning(false);
-                  }}
-                  className="p-1.5 rounded-lg text-amber-400/80 hover:text-amber-200 hover:bg-amber-500/20 cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+        
+        {/* Drive Auth & Validation Alert Banner */}
+        {driveSaveError && (
+          <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl backdrop-blur-md">
+            <div className="flex items-start gap-3">
+              <ShieldAlert className="w-5 h-5 text-amber-400 mt-0.5 shrink-0 animate-pulse" />
+              <div>
+                <h4 className="text-sm font-bold text-amber-300 font-serif">Google Drive Save & Auth Validator Alert</h4>
+                <p className="text-xs text-amber-200/90 mt-0.5 leading-relaxed">{driveSaveError}</p>
               </div>
             </div>
-          )}
-
-          {!userSession ? (
-            <LoginGate
-              onLogin={handleGoogleLogin}
-              onEmailLogin={handleEmailLogin}
-              onEmailSignUp={handleEmailSignUp}
-            />
-          ) : (
-            <>
-              {activeTab === 'dashboard' && (
-                <DashboardOverview
-                  memories={memories}
-                  driveFiles={driveFiles}
-                  userSession={userSession}
-                  syncState={syncState}
-                  lastSyncedAt={lastSyncedAt}
-                  driveFolderUrl={driveFolderUrl}
-                  onSync={handleDriveSync}
-                  onSelectTab={(tab) => setActiveTab(tab)}
-                />
-              )}
-
-              {activeTab === 'mcp' && (
-                <ClaudeMcpHub
-                  memories={memories}
-                  userSession={userSession}
-                  onSaveFileToDrive={handleUploadFile}
-                  onSaveNewMemory={(newMem) => setMemories(prev => [newMem, ...prev])}
-                />
-              )}
-
-              {activeTab === 'drive' && (
-                <DriveExplorer
-                  userSession={userSession}
-                  driveFiles={driveFiles}
-                  driveFolderUrl={driveFolderUrl}
-                  onRefreshDrive={refreshDrive}
-                  onUploadFile={handleUploadFile}
-                  onDeleteFile={handleDeleteFile}
-                  onDownloadFile={handleDownloadFile}
-                  onLogin={handleGoogleLogin}
-                  isLoading={isDriveLoading}
-                />
-              )}
-              {activeTab === 'integrations' && (
-                <IntegrationsTab
-                  memories={memories}
-                  userSession={userSession}
-                  onGoogleConnected={(patch) => {
-                    if (!userSession) return;
-                    updateSession({
-                      ...userSession,
-                      ...patch,
-                      accessToken: patch.accessToken ?? userSession.accessToken,
-                    });
+            <div className="flex items-center gap-2 shrink-0">
+              {tokenExpiredWarning && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await handleGoogleLogin();
+                    setTokenExpiredWarning(false);
+                    setDriveSaveError(null);
+                    refreshDrive();
                   }}
-                />
+                  className="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition-colors shadow-md flex items-center gap-1.5 cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Re-Authenticate with Google</span>
+                </button>
               )}
-            </>
-          )}
-        </main>
-
-        {/* Footer */}
-        <footer className="border-t border-slate-200 bg-slate-50 py-6 text-center text-xs text-slate-500">
-          <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
-            <span>Nexia AI • Google Drive Sync & Claude MCP Server Enabled</span>
-            <span>Claude 3.7 • Grok 3 • ChatGPT • Gemini 2.5</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setDriveSaveError(null);
+                  setTokenExpiredWarning(false);
+                }}
+                className="p-1.5 rounded-lg text-amber-400/80 hover:text-amber-200 hover:bg-amber-500/20 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
-        </footer>
-      </div>
+        )}
+
+        {!userSession ? (
+          <LoginGate 
+            onLogin={handleGoogleLogin} 
+            onEmailLogin={handleEmailLogin} 
+            onEmailSignUp={handleEmailSignUp} 
+          />
+        ) : (
+          <>
+            {activeTab === 'dashboard' && (
+              <DashboardOverview
+                memories={memories}
+                driveFiles={driveFiles}
+                userSession={userSession}
+                syncState={syncState}
+                lastSyncedAt={lastSyncedAt}
+                driveFolderUrl={driveFolderUrl}
+                onSync={handleDriveSync}
+                onSelectTab={(tab) => setActiveTab(tab)}
+              />
+            )}
+
+            {activeTab === 'mcp' && (
+              <ClaudeMcpHub
+                memories={memories}
+                userSession={userSession}
+                onSaveFileToDrive={handleUploadFile}
+                onSaveNewMemory={(newMem) => setMemories(prev => [newMem, ...prev])}
+              />
+            )}
+
+            {activeTab === 'drive' && (
+              <DriveExplorer
+                userSession={userSession}
+                driveFiles={driveFiles}
+                driveFolderUrl={driveFolderUrl}
+                onRefreshDrive={() => refreshDrive(true)}
+                onUploadFile={handleUploadFile}
+                onDeleteFile={handleDeleteFile}
+                onDownloadFile={handleDownloadFile}
+                onLogin={handleGoogleLogin}
+                isLoading={isDriveLoading}
+              />
+            )}
+
+            {activeTab === 'integrations' && (
+              <IntegrationsTab
+                memories={memories}
+                userSession={userSession}
+              />
+            )}
+          </>
+        )}
+      </main>
+
+      {/* Footer */}
+      <footer className="border-t border-slate-200 bg-slate-50 py-6 text-center text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+          <span>Nexia AI • Google Drive Sync & Claude MCP Server Enabled</span>
+          <span>Claude 3.7 • Grok 3 • ChatGPT • Gemini 2.5</span>
+        </div>
+      </footer>
+    </div>
 
     </div>
   );

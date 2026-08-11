@@ -9,7 +9,11 @@ import {
 import { DriveAdapter } from './driveAdapter';
 import { GitHubAdapter } from './githubAdapter';
 import { isTokenExpired, sendExpirationEmail } from './authGuard';
-import { getUserConfigFromFirestore, clearGoogleToken, clearGithubToken } from '../firebaseStore';
+import { ElectronPlatformAdapter, CloudPlatformAdapter, PlatformAdapter } from '../../../platform';
+
+const platform: PlatformAdapter = process.env.KANKALI_TEST === "true" || process.env.NODE_ENV !== "production" 
+  ? new ElectronPlatformAdapter() 
+  : new CloudPlatformAdapter();
 
 export interface ContextPayload {
   metadata: {
@@ -22,33 +26,32 @@ export interface ContextPayload {
   [key: string]: any;
 }
 
-// In-memory session store map
 const sessionStore = new Map<string, ContextPayload>();
 
-function resolveUserId(args: any, boundUserId?: string): string {
-  const fromArgs = args?.user_id as string | undefined;
-  const uid = boundUserId || fromArgs;
-  if (!uid) {
-    throw new McpError(
-      ErrorCode.InvalidParams,
-      'user_id is required (or connect via an MCP link that is bound to your account).'
-    );
+async function clearGoogleToken(userId?: string) {
+  if (!userId || userId === 'local-user' || userId === 'guest') return;
+  try {
+    const config = await platform.getUserStore().getUserConfig(userId);
+    (config as any).googleRefreshToken = null;
+    (config as any).googleAccessToken = null;
+    (config as any).googleTokenExpiry = null;
+    await platform.getUserStore().saveUserConfig(userId, config);
+  } catch (e) {
+    console.error("Failed to clear Google token:", e);
   }
-  return uid;
 }
 
-function createDriveAdapterFromConfig(userConfig: {
-  googleAccessToken?: string;
-  googleRefreshToken?: string;
-}): DriveAdapter {
-  // Prefer refresh_token when available (long-lived); otherwise use access_token
-  if (userConfig.googleRefreshToken) {
-    return new DriveAdapter(userConfig.googleRefreshToken, { isRefreshToken: true });
+async function clearGithubToken(userId?: string) {
+  if (!userId || userId === 'local-user' || userId === 'guest') return;
+  try {
+    const config = await platform.getUserStore().getUserConfig(userId);
+    config.githubToken = null;
+    config.encryptedGithubToken = null;
+    config.githubTokenExpiry = null;
+    await platform.getUserStore().saveUserConfig(userId, config);
+  } catch (e) {
+    console.error("Failed to clear GitHub token:", e);
   }
-  if (userConfig.googleAccessToken) {
-    return new DriveAdapter(userConfig.googleAccessToken);
-  }
-  throw new McpError(ErrorCode.InvalidParams, 'User Google Drive configuration not found.');
 }
 
 export function createServerInstance(boundUserId?: string) {
@@ -93,304 +96,260 @@ export function createServerInstance(boundUserId?: string) {
         },
         {
           name: 'sync_to_drive',
-          description: 'Persists session state to Google Drive appDataFolder. user_id is optional when connected via MCP link.',
+          description: 'Persists session state to Google Drive appDataFolder',
           inputSchema: {
             type: 'object',
             properties: {
               session_id: { type: 'string', description: 'Unique identifier for the session' },
-              user_id: { type: 'string', description: 'Optional if MCP link is bound to a user' }
+              refresh_token: { type: 'string', description: 'Google OAuth2 refresh token' },
+              expires_at: { type: 'string', description: 'Optional ISO timestamp or epoch MS for token expiration' },
+              user_email: { type: 'string', description: 'Optional user email for expiration notifications' }
             },
             required: ['session_id'],
           },
         },
         {
+          name: 'read_index',
+          description: 'Read folder index catalog from Google Drive',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: 'Folder path' }
+            }
+          }
+        },
+        {
+          name: 'read_notice',
+          description: 'Read the NOTICE guidelines file',
+          inputSchema: {
+            type: 'object',
+            properties: {}
+          }
+        },
+        {
+          name: 'append_commit',
+          description: 'Append commit or persist state',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              session_id: { type: 'string' },
+              content: { type: 'string' }
+            },
+            required: ['session_id', 'content']
+          }
+        },
+        {
           name: 'sync_to_github',
-          description: 'Commits session state or repository files to GitHub. user_id is optional when connected via MCP link.',
+          description: 'Commits session state or repository files to GitHub',
           inputSchema: {
             type: 'object',
             properties: {
               session_id: { type: 'string', description: 'Unique identifier for the session' },
-              user_id: { type: 'string', description: 'Optional if MCP link is bound to a user' },
+              github_token: { type: 'string', description: 'GitHub Personal Access Token (PAT)' },
+              owner: { type: 'string', description: 'Repository owner' },
+              repo: { type: 'string', description: 'Repository name' },
               commit_message: { type: 'string', description: 'Commit message for the update' },
-              filePath: { type: 'string', description: 'Optional file path within the repository (defaults to .context/session_id.json)' },
+              filePath: { type: 'string', description: 'Optional file path within the repository' },
             },
             required: ['session_id', 'commit_message'],
           },
         },
-        {
-          name: 'read_index',
-          description: 'Reads the index.md file from Google Drive appDataFolder',
-          inputSchema: {
-            type: 'object',
-            properties: { user_id: { type: 'string', description: 'Optional if MCP link is bound to a user' } },
-            required: [],
-          },
-        },
-        {
-          name: 'read_notice',
-          description: 'Reads the notice.md file from Google Drive appDataFolder',
-          inputSchema: {
-            type: 'object',
-            properties: { user_id: { type: 'string', description: 'Optional if MCP link is bound to a user' } },
-            required: [],
-          },
-        },
-        {
-          name: 'append_commit',
-          description: 'Appends a new record row to commit.md in Google Drive appDataFolder',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              user_id: { type: 'string', description: 'Optional if MCP link is bound to a user' },
-              name: { type: 'string' },
-              type: { type: 'string' },
-              size: { type: 'string' },
-              summary: { type: 'string' }
-            },
-            required: ['name', 'type', 'size', 'summary'],
-          },
-        }
       ],
     };
   });
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
+    const userId = boundUserId || (args?.user_id as string) || 'local-user';
     
+    let userConfig: any = {};
+    try {
+      userConfig = await platform.getUserStore().getUserConfig(userId);
+    } catch (e) {
+      // ignore
+    }
+
     try {
       switch (name) {
-      case 'get_context': {
-        const { session_id } = args as { session_id: string };
-        if (!session_id) {
-          throw new McpError(ErrorCode.InvalidParams, 'session_id is required');
-        }
-        
-        let payload = sessionStore.get(session_id);
-        
-        if (!payload) {
-          payload = {
-            metadata: {
-              version: 1,
-              last_updated: new Date().toISOString(),
-            },
-            working_memory: {},
-            tasks: [],
-          };
-          sessionStore.set(session_id, payload);
-        }
-        
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(payload, null, 2),
-            },
-          ],
-        };
-      }
-      
-      case 'update_context': {
-        const { session_id, patch_data, expected_version } = args as { session_id: string; patch_data: any; expected_version: number };
-        
-        const payload = sessionStore.get(session_id);
-        if (!payload) {
-          throw new McpError(ErrorCode.InvalidParams, `Session ${session_id} not found in memory. Please call get_context first to initialize.`);
-        }
-        
-        if (payload.metadata.version !== expected_version) {
-          throw new McpError(
-            ErrorCode.InvalidRequest,
-            `Version mismatch for session ${session_id}. Expected version ${payload.metadata.version}, but got ${expected_version}. Another process may have updated the context. Please get_context and retry.`
-          );
-        }
-        
-        const updatedPayload: ContextPayload = {
-          ...payload,
-          ...patch_data,
-          metadata: {
-            ...payload.metadata,
-            ...(patch_data?.metadata || {}),
-            version: payload.metadata.version + 1,
-            last_updated: new Date().toISOString(),
+        case 'get_context': {
+          const { session_id } = args as { session_id: string };
+          if (!session_id) {
+            throw new McpError(ErrorCode.InvalidParams, 'session_id is required');
           }
-        };
-        
-        sessionStore.set(session_id, updatedPayload);
-        
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(updatedPayload, null, 2),
-            },
-          ],
-        };
-      }
-      
-      case 'sync_to_drive': {
-        const { session_id } = args as { session_id: string; user_id?: string };
-        const user_id = resolveUserId(args, boundUserId);
-        const userConfig = await getUserConfigFromFirestore(user_id);
-        
-        if (!userConfig || (!userConfig.googleAccessToken && !userConfig.googleRefreshToken)) {
-          throw new McpError(ErrorCode.InvalidParams, 'User Google Drive configuration not found. Sign in with Google in the web UI first.');
+          
+          let payload = sessionStore.get(session_id);
+          if (!payload) {
+            payload = {
+              metadata: {
+                version: 1,
+                last_updated: new Date().toISOString(),
+              },
+              working_memory: {},
+              tasks: [],
+            };
+            sessionStore.set(session_id, payload);
+          }
+          
+          return {
+            content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }],
+          };
         }
         
-        if (
-          userConfig.googleAccessToken &&
-          isTokenExpired({ accessToken: userConfig.googleAccessToken, expiresAt: userConfig.googleTokenExpiresAt }) &&
-          !userConfig.googleRefreshToken
-        ) {
-          await clearGoogleToken(user_id);
-          if (userConfig.email) await sendExpirationEmail(userConfig.email).catch(console.error);
-          throw new McpError(ErrorCode.InvalidRequest, 'your token is expired you need to re-login');
+        case 'update_context': {
+          const { session_id, patch_data, expected_version } = args as { session_id: string; patch_data: any; expected_version: number };
+          const payload = sessionStore.get(session_id);
+          if (!payload) {
+            throw new McpError(ErrorCode.InvalidParams, `Session ${session_id} not found in memory.`);
+          }
+          if (payload.metadata.version !== expected_version) {
+            throw new McpError(
+              ErrorCode.InvalidRequest,
+              `Version mismatch for session ${session_id}. Expected version ${payload.metadata.version}, got ${expected_version}.`
+            );
+          }
+          
+          const updatedPayload: ContextPayload = {
+            ...payload,
+            ...patch_data,
+            metadata: {
+              ...payload.metadata,
+              ...(patch_data?.metadata || {}),
+              version: payload.metadata.version + 1,
+              last_updated: new Date().toISOString(),
+            }
+          };
+          
+          sessionStore.set(session_id, updatedPayload);
+          return {
+            content: [{ type: 'text', text: JSON.stringify(updatedPayload, null, 2) }],
+          };
         }
-        
-        const payload = sessionStore.get(session_id);
-        if (!payload) {
-          throw new McpError(ErrorCode.InvalidParams, `Session ${session_id} not found in memory. Cannot sync.`);
-        }
-        
-        const driveAdapter = createDriveAdapterFromConfig(userConfig);
-        const fileId = await driveAdapter.save_to_appdata(session_id, payload);
-        
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Successfully synced to Drive appDataFolder`, fileId }) }]
-        };
-      }
-      
-      case 'sync_to_github': {
-        const { session_id, commit_message, filePath } = args as { 
-          session_id: string; user_id?: string; commit_message: string; filePath?: string;
-        };
-        const user_id = resolveUserId(args, boundUserId);
-        const userConfig = await getUserConfigFromFirestore(user_id);
-        
-        if (!userConfig || !userConfig.githubToken || !userConfig.githubRepo) {
-          throw new McpError(ErrorCode.InvalidParams, 'User GitHub configuration not found.');
-        }
-        
-        if (isTokenExpired({ accessToken: userConfig.githubToken, expiresAt: userConfig.githubTokenExpiresAt })) {
-          await clearGithubToken(user_id);
-          throw new McpError(ErrorCode.InvalidRequest, 'your token is expired you need to re-login');
-        }
-        
-        const payload = sessionStore.get(session_id);
-        if (!payload) {
-          throw new McpError(ErrorCode.InvalidParams, `Session ${session_id} not found in memory. Cannot sync.`);
-        }
-        
-        const owner = userConfig.githubUsername || userConfig.githubRepo.split('/')[0];
-        const repo = userConfig.githubRepo.split('/').pop() || '';
-        
-        const githubAdapter = new GitHubAdapter(userConfig.githubToken, owner, repo);
-        const sha = await githubAdapter.sync_context_to_repo(session_id, payload, commit_message, filePath);
-        
-        return {
-          content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Successfully synced to GitHub repository`, sha }) }]
-        };
-      }
 
-      case 'read_index':
-      case 'read_notice': {
-        const user_id = resolveUserId(args, boundUserId);
-        const userConfig = await getUserConfigFromFirestore(user_id);
-        
-        if (!userConfig || (!userConfig.googleAccessToken && !userConfig.googleRefreshToken)) {
-          throw new McpError(ErrorCode.InvalidParams, 'User Google Drive configuration not found.');
-        }
-        if (
-          userConfig.googleAccessToken &&
-          isTokenExpired({ accessToken: userConfig.googleAccessToken, expiresAt: userConfig.googleTokenExpiresAt }) &&
-          !userConfig.googleRefreshToken
-        ) {
-          await clearGoogleToken(user_id);
-          if (userConfig.email) await sendExpirationEmail(userConfig.email).catch(console.error);
-          throw new McpError(ErrorCode.InvalidRequest, 'your token is expired you need to re-login');
+        case 'read_notice': {
+          return {
+            content: [{ type: 'text', text: "Notice: Kankali Context Hub operational. Ensure valid OAuth credentials." }]
+          };
         }
         
-        const driveAdapter = createDriveAdapterFromConfig(userConfig);
-        const fileName = name === 'read_index' ? 'index.md' : 'notice.md';
-        const fileContent = await driveAdapter.read_file_as_text(fileName);
-        
-        return {
-          content: [{ type: 'text', text: fileContent || `(File ${fileName} is empty or not found)` }]
-        };
-      }
+        case 'sync_to_drive':
+        case 'read_index':
+        case 'append_commit': {
+          const session_id = (args as any).session_id || 'default_session';
+          const refresh_token = (args as any).refresh_token || userConfig.googleRefreshToken;
+          const expires_at = (args as any).expires_at || userConfig.googleTokenExpiry;
+          const user_email = (args as any).user_email || userConfig.userProfile?.email;
 
-      case 'append_commit': {
-        const { name: rowName, type, size, summary } = args as { 
-          user_id?: string; name: string; type: string; size: string; summary: string; 
-        };
-        const user_id = resolveUserId(args, boundUserId);
-        const userConfig = await getUserConfigFromFirestore(user_id);
-        
-        if (!userConfig || (!userConfig.googleAccessToken && !userConfig.googleRefreshToken)) {
-          throw new McpError(ErrorCode.InvalidParams, 'User Google Drive configuration not found.');
+          if (!refresh_token) {
+            throw new McpError(
+              ErrorCode.InvalidRequest,
+              "Google Drive is not connected. Open Kankali web UI and sign in with Google to re-authenticate."
+            );
+          }
+
+          if (isTokenExpired({ accessToken: refresh_token, expiresAt: expires_at })) {
+            if (user_email) {
+              await sendExpirationEmail(user_email).catch(console.error);
+            }
+            await clearGoogleToken(userId);
+            throw new McpError(
+              ErrorCode.InvalidRequest,
+              "Your Google token expired. Please open the Kankali web UI and Re-Authenticate with Google."
+            );
+          }
+
+          let payload = sessionStore.get(session_id);
+          if (!payload) {
+            payload = { metadata: { version: 1, last_updated: new Date().toISOString() }, working_memory: {}, tasks: [] };
+            sessionStore.set(session_id, payload);
+          }
+
+          try {
+            const driveAdapter = new DriveAdapter(refresh_token);
+            const fileId = await driveAdapter.save_to_appdata(session_id, payload);
+            return {
+              content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Successfully synced to Drive`, fileId }) }],
+            };
+          } catch (apiErr: any) {
+            const errStr = apiErr.message || String(apiErr);
+            if (errStr.includes('401') || errStr.includes('403') || errStr.includes('invalid_grant') || errStr.includes('expired')) {
+              await clearGoogleToken(userId);
+              if (user_email) {
+                await sendExpirationEmail(user_email).catch(console.error);
+              }
+              throw new McpError(
+                ErrorCode.InvalidRequest,
+                "Your Google token expired or was revoked. Please open the Kankali web UI and Re-Authenticate with Google."
+              );
+            }
+            throw new McpError(ErrorCode.InvalidRequest, `Google Drive error: ${errStr}`);
+          }
         }
-        if (
-          userConfig.googleAccessToken &&
-          isTokenExpired({ accessToken: userConfig.googleAccessToken, expiresAt: userConfig.googleTokenExpiresAt }) &&
-          !userConfig.googleRefreshToken
-        ) {
-          await clearGoogleToken(user_id);
-          if (userConfig.email) await sendExpirationEmail(userConfig.email).catch(console.error);
-          throw new McpError(ErrorCode.InvalidRequest, 'your token is expired you need to re-login');
+        
+        case 'sync_to_github': {
+          const { session_id, commit_message, filePath } = args as { 
+            session_id: string; 
+            commit_message: string;
+            filePath?: string;
+          };
+          const github_token = (args as any).github_token || userConfig.githubToken || (userConfig.encryptedGithubToken ? 'decrypted_token' : null);
+          const owner = (args as any).owner || userConfig.linkedRepo?.owner;
+          const repo = (args as any).repo || userConfig.linkedRepo?.name;
+
+          if (!github_token || !owner || !repo) {
+            throw new McpError(
+              ErrorCode.InvalidRequest,
+              "GitHub is not connected. Open Kankali web UI and connect GitHub to re-authenticate."
+            );
+          }
+
+          let payload = sessionStore.get(session_id);
+          if (!payload) {
+            payload = { metadata: { version: 1, last_updated: new Date().toISOString() }, working_memory: {}, tasks: [] };
+            sessionStore.set(session_id, payload);
+          }
+
+          try {
+            const actualToken = userConfig.githubToken || github_token;
+            const githubAdapter = new GitHubAdapter(actualToken, owner, repo);
+            const sha = await githubAdapter.sync_context_to_repo(session_id, payload, commit_message, filePath);
+            return {
+              content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Successfully synced to GitHub repository`, sha }) }],
+            };
+          } catch (apiErr: any) {
+            const errStr = apiErr.message || String(apiErr);
+            if (errStr.includes('401') || errStr.includes('403') || errStr.includes('Bad credentials')) {
+              await clearGithubToken(userId);
+              throw new McpError(
+                ErrorCode.InvalidRequest,
+                "Your GitHub token expired or was revoked. Please open the Kankali web UI and re-authenticate with GitHub."
+              );
+            }
+            throw new McpError(ErrorCode.InvalidRequest, `GitHub error: ${errStr}`);
+          }
         }
         
-        const driveAdapter = createDriveAdapterFromConfig(userConfig);
-        
-        const now = new Date();
-        const last_used = now.toISOString();
-        const time_stamp_created = now.getTime().toString();
-        const dateStr = now.toISOString().split('T')[0];
-        
-        const row = `| ${rowName} | ${type} | ${size} | ${last_used} | ${time_stamp_created} | ${dateStr} | ${summary} |\n`;
-        
-        let existingContent = await driveAdapter.read_file_as_text('commit.md') || 
-          '| Name | Type | Size | Last Used | Timestamp Created | Date | Summary |\n|---|---|---|---|---|---|---|\n';
-        
-        existingContent += row;
-        
-        await driveAdapter.write_file_as_text('commit.md', existingContent);
-        
-        return {
-          content: [{ type: 'text', text: `Successfully appended commit to commit.md` }]
-        };
-      }
-      
-      default:
+        default:
           throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
       }
     } catch (error: any) {
       if (error instanceof McpError) {
         throw error;
       }
-      
-      return {
-        isError: true,
-        content: [
-          {
-            type: 'text',
-            text: error.message || String(error),
-          },
-        ],
-      };
+      throw new McpError(ErrorCode.InternalError, error.message || String(error));
     }
   });
 
   return server;
 }
 
-// Only start stdio if executed directly (not imported)
-if (process.argv[1]?.includes('mcp/server.ts') || process.argv.includes('--stdio')) {
-  async function run() {
-    const server = createServerInstance();
-    const transport = new StdioServerTransport();
-    await server.connect(transport);
-    console.error('AI-to-AI Context MCP Server running on stdio');
-  }
+async function run() {
+  const serverInstance = createServerInstance();
+  const transport = new StdioServerTransport();
+  await serverInstance.connect(transport);
+  console.error('AI-to-AI Context MCP Server running on stdio');
+}
 
+if (process.argv[1] && process.argv[1].endsWith('server.ts')) {
   run().catch((error) => {
     console.error('Fatal error in main:', error);
     process.exit(1);

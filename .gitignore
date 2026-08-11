@@ -31,6 +31,3 @@ npm-debug.log*
 
 # Kankali Local config folder
 .kankali/
-
-# Firebase service account credentials (NEVER commit)
-serviceAccount.json

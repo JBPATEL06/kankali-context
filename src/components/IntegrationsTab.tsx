@@ -1,26 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { UserSession } from '../types';
-import { Github, Folder, RefreshCw, MoreVertical } from 'lucide-react';
+import { Github, Folder, RefreshCw, MoreVertical, TriangleAlert } from 'lucide-react';
 import { saveGithubDataToFirestore, getUserConfigFromFirestore } from '../lib/firebaseStore';
-import { googleSignIn } from '../lib/firebaseAuth';
 
 interface IntegrationsTabProps {
   memories: any[];
   userSession: UserSession | null;
-  onGoogleConnected?: (sessionPatch: Partial<UserSession>) => void;
 }
 
-export const IntegrationsTab: React.FC<IntegrationsTabProps> = ({ memories, userSession, onGoogleConnected }) => {
+export const IntegrationsTab: React.FC<IntegrationsTabProps> = ({ memories, userSession }) => {
   const [ghRepo, setGhRepo] = useState('');
   const [ghBranch, setGhBranch] = useState('main');
   const [ghPath, setGhPath] = useState('');
   const [ghToken, setGhToken] = useState('');
   const [isSavingAndSyncing, setIsSavingAndSyncing] = useState(false);
   const [isGhConnected, setIsGhConnected] = useState(false);
-  const [isDriveConnected, setIsDriveConnected] = useState(false);
-  const [isConnectingDrive, setIsConnectingDrive] = useState(false);
 
   useEffect(() => {
+    // Load existing config
     const loadConfig = async () => {
       if (userSession?.uid) {
         try {
@@ -32,17 +29,6 @@ export const IntegrationsTab: React.FC<IntegrationsTabProps> = ({ memories, user
               setGhToken(cfg.githubToken);
               setIsGhConnected(true);
             }
-            const hasDrive =
-              !!(cfg.googleAccessToken || cfg.googleRefreshToken) &&
-              (!cfg.googleTokenExpiresAt || new Date(cfg.googleTokenExpiresAt).getTime() > Date.now());
-            // Also treat a non-JWT Google access token on the session as connected
-            const sessionTokenLooksGoogle =
-              !!userSession.accessToken && userSession.accessToken.split('.').length !== 3;
-            setIsDriveConnected(hasDrive || sessionTokenLooksGoogle);
-          } else {
-            const sessionTokenLooksGoogle =
-              !!userSession.accessToken && userSession.accessToken.split('.').length !== 3;
-            setIsDriveConnected(sessionTokenLooksGoogle);
           }
         } catch (e) {
           console.error(e);
@@ -87,27 +73,6 @@ export const IntegrationsTab: React.FC<IntegrationsTabProps> = ({ memories, user
     }
   };
 
-  const handleConnectDrive = async () => {
-    setIsConnectingDrive(true);
-    try {
-      const res = await googleSignIn();
-      if (res) {
-        setIsDriveConnected(true);
-        onGoogleConnected?.({
-          uid: res.user.uid,
-          displayName: res.user.displayName,
-          email: res.user.email,
-          photoURL: res.user.photoURL,
-          accessToken: res.accessToken,
-        });
-      }
-    } catch (err) {
-      console.error('Drive connect failed:', err);
-    } finally {
-      setIsConnectingDrive(false);
-    }
-  };
-
   return (
     <div className="w-full max-w-4xl mx-auto pb-12">
       <div className="mb-6">
@@ -127,8 +92,8 @@ export const IntegrationsTab: React.FC<IntegrationsTabProps> = ({ memories, user
                 <div>
                   <h2 className="text-lg font-semibold text-slate-900">GitHub</h2>
                   <div className="flex items-center gap-1.5 mt-0.5">
-                    <div className={`w-2 h-2 rounded-full ${isGhConnected ? 'bg-emerald-500' : 'bg-slate-300'}`}></div>
-                    <span className={`text-xs font-medium ${isGhConnected ? 'text-emerald-600' : 'text-slate-500'}`}>
+                    <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                    <span className="text-xs font-medium text-emerald-600">
                       {isGhConnected ? 'Account Connected' : 'Not Connected'}
                     </span>
                   </div>
@@ -222,9 +187,9 @@ export const IntegrationsTab: React.FC<IntegrationsTabProps> = ({ memories, user
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">Google Drive</h2>
                 <div className="flex items-center gap-1.5 mt-0.5">
-                  <div className={`w-2 h-2 rounded-full ${isDriveConnected ? 'bg-emerald-500' : 'bg-slate-300'}`}></div>
-                  <span className={`text-xs font-medium ${isDriveConnected ? 'text-emerald-600' : 'text-slate-500'}`}>
-                    {isDriveConnected ? 'Connected' : 'Not Connected'}
+                  <div className="w-2 h-2 rounded-full bg-slate-300"></div>
+                  <span className="text-xs font-medium text-slate-500">
+                    Not Connected
                   </span>
                 </div>
               </div>
@@ -233,17 +198,11 @@ export const IntegrationsTab: React.FC<IntegrationsTabProps> = ({ memories, user
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
               <p className="text-sm text-slate-700 leading-relaxed max-w-xl">
                 Connect Google Drive to securely search and summarize documents, spreadsheets, and presentations directly within your sessions.
-                Uses appDataFolder for private MCP context storage.
               </p>
               <div className="flex items-center gap-4 shrink-0 w-full sm:w-auto">
                 <a href="#" className="text-sm font-medium text-blue-700 hover:text-blue-800 whitespace-nowrap">Learn More</a>
-                <button
-                  type="button"
-                  onClick={handleConnectDrive}
-                  disabled={isConnectingDrive}
-                  className="flex-1 sm:flex-none px-4 py-2 rounded-full text-sm font-medium bg-slate-200 hover:bg-slate-300 text-slate-800 transition-colors disabled:opacity-70 cursor-pointer"
-                >
-                  {isConnectingDrive ? 'Connecting...' : isDriveConnected ? 'Re-connect' : 'Connect'}
+                <button className="flex-1 sm:flex-none px-4 py-2 rounded-full text-sm font-medium bg-slate-200 hover:bg-slate-300 text-slate-800 transition-colors">
+                  Connect
                 </button>
               </div>
             </div>

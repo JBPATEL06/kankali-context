@@ -1,36 +1,44 @@
-import { initializeApp as initAdminApp, getApps as getAdminApps, applicationDefault } from 'firebase-admin/app';
-import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+import path from 'path';
+import crypto from 'crypto';
+import fs from 'fs';
 
-function getAdminDb() {
-    if (!getAdminApps().length) {
-        initAdminApp({
-            credential: applicationDefault(),
-        });
+function getAdminFirestore() {
+  if (!getApps().length) {
+    const serviceAccountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || './serviceAccount.json';
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS && fs.existsSync(serviceAccountPath)) {
+      const serviceAccount = require(path.resolve(serviceAccountPath));
+      initializeApp({
+        credential: cert(serviceAccount),
+      });
+    } else {
+      initializeApp();
     }
-    return getAdminFirestore();
+  }
+  return getFirestore();
 }
 
-export async function createMcpKey(userId: string, storageType: string): Promise<string> {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let key = 'mcp_';
-    for (let i = 0; i < 20; i++) {
-        key += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
+export async function generateMcpKey(userId: string, integrationType: 'google_drive' | 'github', tokenData: any): Promise<string> {
+  const db = getAdminFirestore();
+  const mcpKey = crypto.randomBytes(32).toString('hex');
+  
+  await db.collection("mcp_keys").doc(mcpKey).set({
+    key: mcpKey,
+    userId: userId || "anonymous",
+    integrationType,
+    tokenData,
+    createdAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString() // 30 days
+  });
 
-    await getAdminDb().collection('mcp_keys').doc(key).set({
-        userId,
-        storageType,
-        createdAt: new Date().toISOString(),
-    });
-
-    return key;
+  return mcpKey;
 }
 
-export async function getMcpKeyInfo(
-    key: string
-): Promise<{ userId: string; storageType: string } | null> {
-    if (!key) return null;
-    const snap = await getAdminDb().collection('mcp_keys').doc(key).get();
-    if (!snap.exists) return null;
-    return snap.data() as { userId: string; storageType: string };
+export async function verifyMcpKey(mcpKey: string): Promise<any | null> {
+  if (!mcpKey) return null;
+  const db = getAdminFirestore();
+  const doc = await db.collection("mcp_keys").doc(mcpKey).get();
+  if (!doc.exists) return null;
+  return doc.data();
 }

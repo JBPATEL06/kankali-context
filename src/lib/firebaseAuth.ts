@@ -19,15 +19,9 @@ const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 
 const provider = new GoogleAuthProvider();
-// appDataFolder requires drive.appdata; keep file/readonly for explorer UI
-provider.addScope('https://www.googleapis.com/auth/drive.appdata');
+// Google Drive scopes
 provider.addScope('https://www.googleapis.com/auth/drive.file');
 provider.addScope('https://www.googleapis.com/auth/drive.readonly');
-// Offline access so we can obtain a refresh_token when Google issues one
-provider.setCustomParameters({
-  access_type: 'offline',
-  prompt: 'consent',
-});
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
@@ -90,7 +84,7 @@ export const initAuth = (
   });
 };
 
-export const googleSignIn = async (): Promise<{ user: User; accessToken: string; tokenExpiresAt: string; refreshToken?: string } | null> => {
+export const googleSignIn = async (): Promise<{ user: User; accessToken: string; tokenExpiresAt: string } | null> => {
   try {
     isSigningIn = true;
     const result = await signInWithPopup(auth, provider);
@@ -101,23 +95,10 @@ export const googleSignIn = async (): Promise<{ user: User; accessToken: string;
 
     cachedAccessToken = credential.accessToken;
 
-    // Firebase may expose a refreshToken on the user; OAuth credential rarely has it in popup flows.
-    // Persist whatever we can for server-side googleapis usage.
-    const refreshToken =
-      (credential as any).refreshToken ||
-      (result.user as any).stsTokenManager?.refreshToken ||
-      undefined;
+    // Save Google Auth Token and Expiration into Firebase Firestore
+    const { tokenExpiresAt } = await saveGoogleDriveAuthToFirestore(result.user.uid, cachedAccessToken);
 
-    // Google access tokens are typically ~3600s
-    const expiresInSeconds = 3600;
-    const { tokenExpiresAt } = await saveGoogleDriveAuthToFirestore(
-      result.user.uid,
-      cachedAccessToken,
-      expiresInSeconds,
-      refreshToken
-    );
-
-    return { user: result.user, accessToken: cachedAccessToken, tokenExpiresAt, refreshToken };
+    return { user: result.user, accessToken: cachedAccessToken, tokenExpiresAt };
   } catch (error: any) {
     console.error('Google Sign-In Error:', error);
     throw error;

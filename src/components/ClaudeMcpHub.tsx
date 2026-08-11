@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { UserSession } from '../types';
-import { RefreshCw, Share2, Plus, Github, Cloud, FolderPlus, UserPlus, Save } from 'lucide-react';
+import { RefreshCw, Play, AlertCircle, Share2, Zap, Plus, Github, Cloud, FolderPlus, UserPlus, Save } from 'lucide-react';
 
 interface ClaudeMcpHubProps {
   memories: any[];
@@ -10,6 +10,9 @@ interface ClaudeMcpHubProps {
 }
 
 export const ClaudeMcpHub: React.FC<ClaudeMcpHubProps> = () => {
+  const [claudeUrl, setClaudeUrl] = useState('ws://localhost:8080/mcp/claude');
+  const [grokUrl, setGrokUrl] = useState('ws://192.168.1.105:9090/mcp/grok');
+  
   const [showGenerateMcp, setShowGenerateMcp] = useState(false);
   const [storageType, setStorageType] = useState<'github' | 'drive' | null>(null);
   const [githubOption, setGithubOption] = useState<'new_repo' | 'existing_repo_new_folder' | null>(null);
@@ -25,22 +28,16 @@ export const ClaudeMcpHub: React.FC<ClaudeMcpHubProps> = () => {
     setDriveOption(null);
   };
 
-  const handleGenerateMcp = async () => {
+  const handleGenerateMcp = () => {
     setShowSuccessMessage(true);
-    try {
-      const response = await fetch('/api/mcp/generate-link', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storageType })
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Failed to generate link');
-
+    setTimeout(() => {
+      setShowSuccessMessage(false);
+      
       const newMcp = {
         id: Date.now(),
         name: `Custom MCP (${storageType === 'github' ? 'GitHub' : 'Drive'})`,
         version: 'v1.0.0',
-        url: data.url,
+        url: `wss://${window.location.host}/mcp/custom-${Date.now()}`,
         status: 'online',
         permissions: ['Read Context', 'Write Context'],
         syncs: [
@@ -50,12 +47,7 @@ export const ClaudeMcpHub: React.FC<ClaudeMcpHubProps> = () => {
       
       setCustomMcps(prev => [newMcp, ...prev]);
       resetGenerateState();
-    } catch (err: any) {
-      console.error(err);
-      alert('Error generating MCP link: ' + err.message);
-    } finally {
-      setShowSuccessMessage(false);
-    }
+    }, 1500);
   };
 
   return (
@@ -276,7 +268,133 @@ export const ClaudeMcpHub: React.FC<ClaudeMcpHubProps> = () => {
           </div>
         ))}
 
+        {/* Claude MCP Card */}
+        <div className="bg-slate-50 border border-slate-200 rounded-xl overflow-hidden flex flex-col shadow-sm">
+          <div className="p-6 flex-1 flex flex-col">
+            <div className="flex items-start justify-between mb-6">
+              <div className="flex items-start gap-3">
+                <div className="mt-1">
+                  <Share2 className="w-5 h-5 text-blue-600" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-medium text-slate-900">Claude MCP</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">v2.1.0</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-100 border border-emerald-200">
+                <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+                <span className="text-[11px] font-bold text-emerald-700 tracking-wide uppercase">Online</span>
+              </div>
+            </div>
 
+            <div className="space-y-1.5 mb-5">
+              <label className="text-xs font-medium text-slate-600">Server URL</label>
+              <input
+                type="text"
+                value={claudeUrl}
+                onChange={(e) => setClaudeUrl(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-700"
+              />
+            </div>
+
+            <div className="mb-6">
+              <label className="text-xs font-medium text-slate-600 block mb-2">Permissions</label>
+              <div className="flex flex-wrap gap-2">
+                <span className="px-3 py-1 rounded-full bg-blue-300 text-blue-900 text-xs font-medium">Read Context</span>
+                <span className="px-3 py-1 rounded-full bg-blue-300 text-blue-900 text-xs font-medium">Write Context</span>
+                <span className="px-3 py-1 rounded-full bg-slate-200 text-slate-700 text-xs font-medium">Execute Tools</span>
+              </div>
+            </div>
+
+            <div className="mb-6 flex-1">
+              <label className="text-xs font-medium text-slate-600 block mb-2">Recent Syncs</label>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-slate-700">Financial Data Model</span>
+                  <span className="text-sm text-slate-500">2 mins ago</span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-slate-700">User Profiles DB</span>
+                  <span className="text-sm text-slate-500">15 mins ago</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 mt-auto pt-4">
+              <button className="flex-1 py-2 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-800 text-sm font-medium transition-colors">
+                Configuration
+              </button>
+              <button className="flex-1 py-2 rounded-lg bg-[#003B95] hover:bg-blue-800 text-white text-sm font-medium flex items-center justify-center gap-2 transition-colors">
+                <RefreshCw className="w-4 h-4" />
+                <span>Restart Server</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Grok MCP Card */}
+        <div className="bg-slate-50 border border-slate-200 rounded-xl overflow-hidden flex flex-col shadow-sm">
+          <div className="p-6 flex-1 flex flex-col">
+            <div className="flex items-start justify-between mb-6">
+              <div className="flex items-start gap-3">
+                <div className="mt-1">
+                  <Zap className="w-5 h-5 text-red-500" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-medium text-slate-900">Grok MCP</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">v1.0.5</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-100 border border-red-200">
+                <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                <span className="text-[11px] font-bold text-red-700 tracking-wide uppercase">Offline</span>
+              </div>
+            </div>
+
+            <div className="space-y-1.5 mb-5">
+              <label className="text-xs font-medium text-slate-600">Server URL</label>
+              <input
+                type="text"
+                value={grokUrl}
+                onChange={(e) => setGrokUrl(e.target.value)}
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-md text-sm font-mono focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-700"
+              />
+            </div>
+
+            <div className="mb-6">
+              <label className="text-xs font-medium text-slate-600 block mb-2">Permissions</label>
+              <div className="flex flex-wrap gap-2">
+                <span className="px-3 py-1 rounded-full bg-blue-300 text-blue-900 text-xs font-medium">Read Context</span>
+                <span className="px-3 py-1 rounded-full bg-slate-200 text-slate-700 text-xs font-medium">Search Web</span>
+              </div>
+            </div>
+
+            <div className="mb-6 flex-1">
+              <label className="text-xs font-medium text-slate-600 block mb-2">Recent Syncs</label>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-slate-400">Real-time News Feed</span>
+                  <span className="text-sm text-slate-400">2 days ago</span>
+                </div>
+              </div>
+              
+              <div className="mt-4 p-3 rounded-lg bg-red-100 border border-red-200 flex items-start gap-2 text-red-700 text-sm">
+                <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                <p>Connection lost. Failed to ping server after 3 attempts.</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 mt-auto pt-4">
+              <button className="flex-1 py-2 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-800 text-sm font-medium transition-colors">
+                Configuration
+              </button>
+              <button className="flex-1 py-2 rounded-lg bg-[#003B95] hover:bg-blue-800 text-white text-sm font-medium flex items-center justify-center gap-2 transition-colors">
+                <Play className="w-4 h-4 fill-current" />
+                <span>Start Server</span>
+              </button>
+            </div>
+          </div>
+        </div>
 
       </div>
     </div>

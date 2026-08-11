@@ -2,8 +2,6 @@ import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'f
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-
-
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId);
 
@@ -12,7 +10,6 @@ export interface UserFirebaseConfig {
   email: string;
   displayName?: string;
   googleAccessToken?: string;
-  googleRefreshToken?: string;
   googleTokenExpiresAt?: string;
   googleTokenObtainedAt?: string;
   mcpStorageMode?: 'drive' | 'github' | 'ask_user' | 'single_url' | 'url';
@@ -44,11 +41,9 @@ export async function saveUserConfigToFirestore(
 
   // Always sync local storage cache first
   try {
-    if (typeof localStorage !== 'undefined') {
-      const existingRaw = localStorage.getItem(cacheKey);
-      const existing = existingRaw ? JSON.parse(existingRaw) : {};
-      localStorage.setItem(cacheKey, JSON.stringify({ ...existing, ...payload }));
-    }
+    const existingRaw = localStorage.getItem(cacheKey);
+    const existing = existingRaw ? JSON.parse(existingRaw) : {};
+    localStorage.setItem(cacheKey, JSON.stringify({ ...existing, ...payload }));
   } catch (e) {
     // Ignore storage quota errors
   }
@@ -74,10 +69,8 @@ export async function getUserConfigFromFirestore(userId: string): Promise<UserFi
     if (snap.exists()) {
       const data = snap.data() as UserFirebaseConfig;
       try {
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem(cacheKey, JSON.stringify(data));
-        }
-      } catch (e) { }
+        localStorage.setItem(cacheKey, JSON.stringify(data));
+      } catch (e) {}
       return data;
     }
   } catch (error: any) {
@@ -86,13 +79,11 @@ export async function getUserConfigFromFirestore(userId: string): Promise<UserFi
 
   // Fallback to local storage if Firestore is offline
   try {
-    if (typeof localStorage !== 'undefined') {
-      const localRaw = localStorage.getItem(cacheKey);
-      if (localRaw) {
-        return JSON.parse(localRaw) as UserFirebaseConfig;
-      }
+    const localRaw = localStorage.getItem(cacheKey);
+    if (localRaw) {
+      return JSON.parse(localRaw) as UserFirebaseConfig;
     }
-  } catch (e) { }
+  } catch (e) {}
 
   return null;
 }
@@ -125,55 +116,16 @@ export async function saveGithubDataToFirestore(
 export async function saveGoogleDriveAuthToFirestore(
   userId: string,
   accessToken: string,
-  expiresInSeconds = 3600,
-  refreshToken?: string
+  expiresInSeconds = 3600
 ): Promise<{ tokenExpiresAt: string }> {
   const obtainedAt = new Date().toISOString();
   const tokenExpiresAt = new Date(Date.now() + expiresInSeconds * 1000).toISOString();
 
-  const payload: Partial<UserFirebaseConfig> = {
+  await saveUserConfigToFirestore(userId, {
     googleAccessToken: accessToken,
     googleTokenObtainedAt: obtainedAt,
     googleTokenExpiresAt: tokenExpiresAt,
-  };
-  if (refreshToken) {
-    payload.googleRefreshToken = refreshToken;
-  }
-
-  await saveUserConfigToFirestore(userId, payload);
+  });
 
   return { tokenExpiresAt };
 }
-
-/**
- * Removes Google Drive tokens when expired
- */
-export async function clearGoogleToken(userId: string): Promise<void> {
-  const userRef = doc(db, 'users', userId);
-  await updateDoc(userRef, {
-    googleAccessToken: null,
-    googleRefreshToken: null,
-    googleTokenExpiresAt: null,
-    googleTokenObtainedAt: null
-  } as any);
-}
-
-/**
- * Removes GitHub token when expired
- */
-export async function clearGithubToken(userId: string): Promise<void> {
-  const userRef = doc(db, 'users', userId);
-  await updateDoc(userRef, {
-    githubToken: null,
-    githubTokenExpiresAt: null
-  } as any);
-}
-
-/**
- * Creates a unique MCP API Key for a user's AI connector.
- */
-
-/**
- * Validates and retrieves the User ID and Storage Type for an MCP API Key.
- */
-
