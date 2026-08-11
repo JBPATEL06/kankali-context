@@ -11,8 +11,7 @@ import { ElectronPlatformAdapter, CloudPlatformAdapter, PlatformAdapter, UserCon
 import crypto from "crypto";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { createServerInstance } from "./src/lib/mcp/server";
-import { createMcpKey, getMcpKeyInfo } from "./src/lib/firebaseStore";
-
+import { createMcpKey, getMcpKeyInfo } from "./src/lib/mcpKeysAdmin";
 dotenv.config();
 
 let safeStorage: any = null;
@@ -583,22 +582,22 @@ app.post("/api/mcp/generate-link", async (req, res) => {
 app.get("/api/mcp/sse", async (req, res) => {
   const key = req.query.key as string;
   if (!key) return res.status(401).send("API Key required");
-  
+
   const keyInfo = await getMcpKeyInfo(key);
   if (!keyInfo) return res.status(401).send("Invalid API Key");
 
   console.log(`[MCP] New SSE Connection for key: ${key}`);
   const transport = new SSEServerTransport("/api/mcp/message?key=" + key, res);
   sseTransports.set(key, transport);
-  
-  const server = createServerInstance();
+
+  const server = createServerInstance(keyInfo.userId);
   await server.connect(transport);
 });
 
 app.post("/api/mcp/message", async (req, res) => {
   const key = req.query.key as string;
   if (!key) return res.status(401).send("API Key required");
-  
+
   const transport = sseTransports.get(key);
   if (!transport) return res.status(404).send("Transport not found");
 
@@ -745,9 +744,9 @@ export async function scaffoldRepository(octokit: Octokit, owner: string, repo: 
   };
 
   await commitFile("index.md", `# Kankali Context Index\n\nWelcome to Kankali's Table of Contents. This repository acts as a localized AI context store.\n\n## Chapters\n- [issues/index.md](file:///issues/index.md): Listing of all issues, debugging notes, and active trouble tickets.\n- [project/index.md](file:///project/index.md): Project notes, snippets, configuration parameters, and architectural documentation.\n`, "Initial Kankali index scaffolding");
-  
+
   await commitFile("issues/index.md", `# Issues Catalog\n\nThis folder contains debugging sessions, issue trackers, and resolution notes.\n\n## Entries\n`, "Initial Kankali issues scaffolding");
-  
+
   await commitFile("project/index.md", `# Projects Catalog\n\nThis folder organizes project-specific directories, code snippets, and designs.\n\n## Entries\n`, "Initial Kankali projects scaffolding");
 
   await commitFile(".gitignore", `node_modules/\ndist/\nbuild/\n.env\n*.local\n.gemini/\n.dbci/\n`, "Add Kankali .gitignore");
@@ -1156,7 +1155,7 @@ app.post("/api/github/link", rateLimiter, async (req, res) => {
   try {
     const octokit = new Octokit({ auth: token });
     const userRes = await octokit.rest.users.getAuthenticated();
-    
+
     const headers = userRes.headers;
     const scopes = headers["x-oauth-scopes"] || "";
     const expiryHeader = headers["github-authentication-token-expiration"];
@@ -1168,7 +1167,7 @@ app.post("/api/github/link", rateLimiter, async (req, res) => {
         error: "Please use a classic Personal Access Token. Fine-grained tokens are not currently supported."
       });
     }
-    
+
     const scopeArray = scopes.split(",").map(s => s.trim());
     const hasRepoScope = scopeArray.includes("repo") || scopeArray.includes("public_repo");
     if (!hasRepoScope) {
@@ -1308,7 +1307,7 @@ app.get("/api/github/tree", async (req, res) => {
 
   try {
     const octokit = getGithubClient();
-    
+
     const refRes = await octokit.rest.git.getRef({
       owner,
       repo,
@@ -1337,7 +1336,7 @@ app.get("/api/github/tree", async (req, res) => {
       const parts = node.path.split("/");
       const name = parts.pop()!;
       const parentPath = parts.join("/");
-      
+
       if (node.type === "tree") {
         folders.push({
           id: node.path,
@@ -1420,7 +1419,7 @@ app.post("/api/github/delete-file", async (req, res) => {
 
   try {
     const octokit = getGithubClient();
-    
+
     let fileSha: string | undefined;
     try {
       const fileRes = await octokit.rest.repos.getContent({
@@ -1488,7 +1487,7 @@ app.post("/api/github/create-folder", async (req, res) => {
     const folderName = dirPath.split("/").pop();
     const indexFilePath = `${dirPath}/index.md`;
     const tocTemplate = `# ${folderName} Catalog\n\nThis folder holds relative context assets.\n\n## Entries\n`;
-    
+
     await writeRepoFile(octokit, owner, repo, indexFilePath, tocTemplate, branch);
     await updateParentIndex(octokit, owner, repo, indexFilePath, `Folder Catalog for '${folderName}'`, branch);
     res.json({ success: true });
@@ -1607,7 +1606,7 @@ app.get("/api/mcp/status", (req, res) => {
   const protocol = req.protocol;
   const host = req.get("host") || "localhost:3000";
   const baseUrl = `${protocol}://${host}`;
-  
+
   res.json({
     status: "online",
     name: "Nexus Context Hub Claude MCP Server",
@@ -1735,7 +1734,7 @@ function getUserProfileFromReq(req: express.Request) {
   const email = userParam.includes("@") ? userParam : `${userParam}@nexus.hub`;
   const rawName = userParam.split("@")[0].replace(/[^a-zA-Z0-9_]/g, " ");
   const displayName = rawName.charAt(0).toUpperCase() + rawName.slice(1);
-  
+
   return {
     userId: userParam,
     email,
@@ -2316,7 +2315,7 @@ need instead of the whole repository.
         if (toolName === "list_folder") {
           const targetPath = (args.path || "").replace(/^\/+|\/+$/g, "");
           const indexFilePath = targetPath ? `${targetPath}/index.md` : "index.md";
-          
+
           try {
             const indexFile = await resolveDrivePath(accessToken, hubFolderId, indexFilePath);
             if (indexFile.exists) {
@@ -2330,7 +2329,7 @@ need instead of the whole repository.
               });
             }
 
-            const targetFolder = targetPath 
+            const targetFolder = targetPath
               ? await resolveDrivePath(accessToken, hubFolderId, targetPath, { isFolder: true })
               : { id: hubFolderId, exists: true };
 
@@ -2500,7 +2499,7 @@ need instead of the whole repository.
             const newFolder = await resolveDrivePath(accessToken, hubFolderId, targetPath, { createIfMissing: true, isFolder: true });
             const indexFilePath = `${targetPath}/index.md`;
             const indexContent = `# ${folderName} Catalog\n\nThis folder holds relative context assets.\n\n## Entries\n`;
-            
+
             const indexFileRes = await resolveDrivePath(accessToken, hubFolderId, indexFilePath);
             await uploadToDriveWithVerification(
               accessToken,
@@ -2515,15 +2514,15 @@ need instead of the whole repository.
             parts.pop();
             const parentPath = parts.join("/");
             const parentIndexFilePath = parentPath ? `${parentPath}/index.md` : "index.md";
-            
+
             const parentIndexRes = await resolveDrivePath(accessToken, hubFolderId, parentIndexFilePath);
             let parentIndexContent = parentPath ? `# Parent Catalog\n\n## Entries\n` : `# Kankali Context Index\n\n## Chapters\n`;
             if (parentIndexRes.exists) {
               parentIndexContent = await readDriveFile(accessToken, parentIndexRes.id);
             }
             const updatedIndex = addEntryToCatalogContent(parentIndexContent, indexFilePath, `Folder Catalog for '${folderName}'`);
-            
-            const parentDirId = parentPath 
+
+            const parentDirId = parentPath
               ? (await resolveDrivePath(accessToken, hubFolderId, parentPath, { isFolder: true })).id
               : hubFolderId;
 
@@ -2576,7 +2575,7 @@ need instead of the whole repository.
             if (parentIndexRes.exists) {
               const indexContent = await readDriveFile(accessToken, parentIndexRes.id);
               const updatedContent = removeEntryFromCatalogContent(indexContent, filePath);
-              const parentDirId = parentPath 
+              const parentDirId = parentPath
                 ? (await resolveDrivePath(accessToken, hubFolderId, parentPath, { isFolder: true })).id
                 : hubFolderId;
 
@@ -2625,12 +2624,12 @@ need instead of the whole repository.
             parts.pop();
             const parentPath = parts.join("/");
             const parentIndexFilePath = parentPath ? `${parentPath}/index.md` : "index.md";
-            
+
             const parentIndexRes = await resolveDrivePath(accessToken, hubFolderId, parentIndexFilePath);
             if (parentIndexRes.exists) {
               const indexContent = await readDriveFile(accessToken, parentIndexRes.id);
               const updatedContent = removeEntryFromCatalogContent(indexContent, `${dirPath}/index.md`);
-              const parentDirId = parentPath 
+              const parentDirId = parentPath
                 ? (await resolveDrivePath(accessToken, hubFolderId, parentPath, { isFolder: true })).id
                 : hubFolderId;
 
@@ -2889,7 +2888,7 @@ need instead of the whole repository.
           const octokit = getGithubClient();
           const folderName = targetPath.split("/").pop();
           const tocTemplate = `# ${folderName} Catalog\n\nThis folder holds relative context assets.\n\n## Entries\n`;
-          
+
           await writeRepoFile(octokit, owner, repo, indexFilePath, tocTemplate, branch);
           await updateParentIndex(octokit, owner, repo, indexFilePath, `Folder Catalog for '${folderName}'`, branch);
 
@@ -2926,7 +2925,7 @@ need instead of the whole repository.
           if (!approved) return;
 
           const octokit = getGithubClient();
-          
+
           let fileSha: string | undefined;
           try {
             const fileRes = await octokit.rest.repos.getContent({

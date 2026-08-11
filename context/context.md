@@ -7,7 +7,7 @@ AI-to-AI Context-Sharing MCP Server & Multi-User Sync Platform that allows indep
 TypeScript, Node.js, Express, React, Vite, Model Context Protocol (MCP) SDK, Firebase (Firestore & Auth), Google Drive API, GitHub API.
 
 ## Current Status
-Firebase token storage implemented. Token expiration guard (strict < 2 mins) implemented for Drive and GitHub. MCP Server tools expanded with `read_index`, `read_notice`, and `append_commit`. Added Web HTTP SSE Endpoint for connecting AI clients and generating custom MCP links via the UI.
+Firebase token storage implemented. Token expiration guard (strict < 2 mins) in place. MCP Server tools expanded with `read_index`, `read_notice`, and `append_commit`. Web HTTP SSE endpoint live for AI client connections. MCP API key admin module (`mcpKeysAdmin.ts`) added for managing MCP keys via Firestore. Auth guard refactored for improved route protection.
 
 ## Architecture / Key Decisions
 - **Firebase over Local Storage**: All tokens (Google Drive, GitHub) are persisted to Firestore instead of a local SQLite database, allowing future cloud scalability.
@@ -15,14 +15,17 @@ Firebase token storage implemented. Token expiration guard (strict < 2 mins) imp
 - **Server-Side Token Loading**: AI agents now pass `user_id` instead of raw tokens in their MCP tool calls; the server handles fetching and validating credentials from Firebase.
 
 ## Folder / File Map
-- `src/lib/mcp/server.ts`: The MCP Server implementation with context sync & MD tools.
-- `src/lib/mcp/authGuard.ts`: Token expiration validation logic.
-- `src/lib/firebaseStore.ts`: Node.js-safe Firestore interactions for the backend server.
-- `src/lib/mcp/driveAdapter.ts`: Integrates with Google Drive appDataFolder for JSON and Markdown persistence.
+- `src/lib/mcp/server.ts`: MCP Server with context sync & MD tools.
+- `src/lib/mcp/authGuard.ts`: MCP route protection & token expiration validation.
+- `src/lib/firebaseStore.ts`: Node.js-safe Firestore interactions for the backend.
+- `src/lib/mcpKeysAdmin.ts`: Admin module for managing MCP API keys in Firestore.
+- `src/lib/mcp/driveAdapter.ts`: Google Drive appDataFolder JSON/Markdown persistence.
+- `serviceAccount.json`: Firebase service account credentials — **gitignored, never commit**.
 
 ## Open Issues / TODO
 - Add WebSocket support for real-time multi-agent notification broadcasts.
 
 ## Next Steps
-- Verify the Web MCP SSE flow in the UI.
-- Implement AI `user_id` injection or authentication flow inside the SSE connection so that tools know which user is authenticated.
+- Implement automatic `user_id` injection in the SSE connection handler (AI should not need to pass it manually).
+- Add WebSocket support for real-time multi-agent notification broadcasts.
+- Verify the MCP keys admin flow end-to-end in the UI.

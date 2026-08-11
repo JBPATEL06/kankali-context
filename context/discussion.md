@@ -37,3 +37,22 @@
 
 **Open questions / follow-ups:**
 - Currently, the AI tool calls in the SSE flow still require `user_id` to be passed as an argument. We need to implement an automatic injection of this `user_id` inside the server request handler since the AI only knows about the URL key.
+
+## [2026-08-11] MCP Keys Admin + Auth Guard Refactor + Git Push
+
+**What was discussed:**
+- Pushing current work to GitHub.
+- Security check flagged `serviceAccount.json` was untracked and missing from `.gitignore`.
+
+**Decisions made:**
+- Added `serviceAccount.json` to `.gitignore` immediately to prevent accidental credential exposure.
+
+**Changes made to code/project:**
+- **`.gitignore`**: Added `serviceAccount.json` exclusion rule.
+- **`src/lib/mcpKeysAdmin.ts`**: New module — admin functions for managing MCP API keys in Firestore.
+- **`src/lib/mcp/authGuard.ts`**: Refactored for improved MCP route protection.
+- **`src/lib/firebaseStore.ts`**: Refactored store logic.
+- Committed and pushed to `origin/main` (commit `270d956`).
+
+**Open questions / follow-ups:**
+- Verify `mcpKeysAdmin.ts` integration with the MCP key generation flow end-to-end.
