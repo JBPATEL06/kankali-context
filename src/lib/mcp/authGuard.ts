@@ -1,14 +1,19 @@
-export function isTokenExpired(tokenMetadata: { accessToken: string; expiresAt?: number | string }): boolean {
+/**
+ * Token expiration guard with safety buffer.
+ * Supports ISO timestamp strings or numeric epoch milliseconds.
+ */
+export function isTokenExpired(tokenMetadata: { accessToken?: string; expiresAt?: number | string }): boolean {
   if (!tokenMetadata.expiresAt) {
-    // If we don't have an expiration time, we can't definitively say it's expired.
-    // The API call itself will fail if it is actually expired.
+    // If no expiration time is recorded, allow API call to attempt; it will fail explicitly if revoked/expired.
     return false; 
   }
   
   const expiresAtMs = typeof tokenMetadata.expiresAt === 'string' 
     ? new Date(tokenMetadata.expiresAt).getTime()
-    : tokenMetadata.expiresAt;
+    : Number(tokenMetadata.expiresAt);
     
+  if (isNaN(expiresAtMs)) return false;
+
   const nowMs = Date.now();
   const bufferMs = 2 * 60 * 1000; // 2-minute buffer
   
@@ -16,11 +21,11 @@ export function isTokenExpired(tokenMetadata: { accessToken: string; expiresAt?:
 }
 
 export async function sendExpirationEmail(userEmail: string): Promise<void> {
-  // In a full production environment, this would integrate with an email provider like SendGrid, SES, or a Firebase Extension.
+  // In a full production environment, this integrates with SendGrid/SES/Firebase extensions.
   console.log(`[EMAIL NOTIFICATION SENT] To: ${userEmail}`);
   console.log(`[SUBJECT] Action Required: Re-authenticate Context-Sharing MCP`);
   console.log(`[BODY] Your Google Drive session for the Context-Sharing MCP has expired. Please log in to re-authenticate.`);
   
-  // Simulate network latency for the email service
-  await new Promise(resolve => setTimeout(resolve, 300));
+  // Simulate latency
+  await new Promise(resolve => setTimeout(resolve, 100));
 }

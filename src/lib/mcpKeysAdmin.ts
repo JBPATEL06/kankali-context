@@ -7,8 +7,9 @@ import fs from 'fs';
 function getAdminFirestore() {
   if (!getApps().length) {
     const serviceAccountPath = process.env.GOOGLE_APPLICATION_CREDENTIALS || './serviceAccount.json';
-    if (process.env.GOOGLE_APPLICATION_CREDENTIALS && fs.existsSync(serviceAccountPath)) {
-      const serviceAccount = require(path.resolve(serviceAccountPath));
+    const resolvedPath = path.resolve(serviceAccountPath);
+    if (fs.existsSync(resolvedPath)) {
+      const serviceAccount = require(resolvedPath);
       initializeApp({
         credential: cert(serviceAccount),
       });
@@ -40,5 +41,16 @@ export async function verifyMcpKey(mcpKey: string): Promise<any | null> {
   const db = getAdminFirestore();
   const doc = await db.collection("mcp_keys").doc(mcpKey).get();
   if (!doc.exists) return null;
-  return doc.data();
+  const data = doc.data();
+  if (!data) return null;
+
+  if (data.expiresAt) {
+    const expiresAtMs = typeof data.expiresAt === 'string' ? new Date(data.expiresAt).getTime() : Number(data.expiresAt);
+    if (!isNaN(expiresAtMs) && expiresAtMs < Date.now()) {
+      console.warn(`[MCP Auth] MCP Key ${mcpKey} has expired on ${data.expiresAt}`);
+      return null;
+    }
+  }
+
+  return data;
 }

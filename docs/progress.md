@@ -1,33 +1,24 @@
-# Development Progress & Roadmap (`docs/progress.md`)
+# Progress
 
-## 🚀 Completed Milestones
+## Done
+- **Book-Style Context System & MCP Tools**:
+  - Created shared interfaces (`McpFileItem`, `McpFolderItem`, `CommitLogEntry`, `BookStyleIndex`) in `src/lib/mcp/types.ts`.
+  - Implemented `DriveAdapter` (`src/lib/mcp/driveAdapter.ts`) supporting hierarchical folder/file CRUD, mandatory read-back verification, automated `commit.md` ledger updates, and `index.md` catalog synchronization.
+  - Implemented `GitHubAdapter` (`src/lib/mcp/githubAdapter.ts`) with hierarchical file/folder CRUD, SHA tracking, and branch commit management.
+  - Modularized tool handlers into `src/lib/mcp/tools/bookStyleTools.ts` and registered full tool suite (`write_file`, `read_file`, `create_folder`, `read_folder`, `delete_file`, `delete_folder`, `append_commit`, `read_notice`, `read_index`, `sync_to_drive`, `sync_to_github`) in `src/lib/mcp/server.ts`.
+  - Proxied legacy `get_context` and `update_context` tools with optimistic locking to book-style storage.
+- **Bug & Security Fixes**:
+  - Fixed `[High]` `read_index` and `append_commit` fallback — now operating directly on book-style `index.md` and `commit.md`.
+  - Fixed `[Critical]` `sync_to_github` token decryption via `platform.decryptSecret`.
+  - Fixed `[Medium]` `isTokenExpired` parameter handling in `authGuard.ts`.
+  - Added `serviceAccount.json`, `firebase-applet-config.json`, and `*.env.local` to `.gitignore`.
+  - Added explicit `expiresAt` validation in `verifyMcpKey` (`mcpKeysAdmin.ts`).
+- Comprehensive end-to-end verification passing in `src/scripts/testBookStyleMcp.ts` and clean `tsc --noEmit`.
 
-- [x] **Step 1: Schema & Architecture Design**
-  - Defined explicit tool names (`get_context`, `update_context`, `sync_to_drive`, `sync_to_github`).
-  - Added integer `version` property inside `metadata` for optimistic locking.
-  - Added optional `filePath` parameter for GitHub syncing (`.context/session.json`).
+## In Progress
+- UI alignment for `DriveExplorer.tsx` and `ClaudeMcpHub.tsx` to visualize the book-style `notice.md`, `index.md`, `commit.md` hierarchy.
 
-- [x] **Step 2: Google Drive Adapter (`appDataFolder`)**
-  - Implemented `DriveAdapter` with `save_to_appdata` and `read_from_appdata`.
-  - Added `and trashed = false` filtering to file lookups.
-  - Configured multi-user support with `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` and user refresh tokens.
-
-- [x] **Step 3: GitHub Storage Adapter**
-  - Implemented `GitHubAdapter` using `@octokit/rest`.
-  - Added file SHA lookup and base64 encoding for commit updates.
-
-- [x] **Step 4: MCP Server Setup & Tool Handlers**
-  - Integrated `@modelcontextprotocol/sdk`.
-  - Implemented in-memory session store map (`Map<string, ContextPayload>`).
-  - Registered all 4 core tools with strict input schemas and robust error handling.
-
-- [x] **Step 5: Auth Expiration Guard & Diagnostics**
-  - Created `authGuard.ts` for token expiration checks and email notification stubs.
-  - Built diagnostic verification script (`src/scripts/verifyAuth.ts`).
-
----
-
-## 📅 Upcoming / Future Enhancements
-- [ ] Add WebSocket support for real-time multi-agent notification broadcasts.
-- [ ] Implement persistent database caching (Firestore/Cloud SQL) for session store backup.
-- [ ] Expand test coverage with automated unit tests for optimistic locking conflicts.
+## Broken / Known-Bad
+- Missing `drive.appdata` / file OAuth scope in Google sign-in → 403 on Google sign-in operations (`firebaseAuth.ts` L23).
+- CORS middleware uses `Access-Control-Allow-Origin: *` in production (`server.ts` L262).
+- `multiTenantMiddleware` query-param bypass for `/api/` routes (`server.ts` L213).

@@ -260,7 +260,10 @@ export default function App() {
         });
       },
       () => {
-        // Do not immediately wipe stored session on transient auth change if we have stored session
+        // Firebase confirmed user is signed out — clear any stale session
+        updateSession(null);
+        setTokenExpiredWarning(false);
+        setDriveSaveError(null);
       }
     );
     return () => unsubscribe();
@@ -461,6 +464,7 @@ export default function App() {
               <IntegrationsTab
                 memories={memories}
                 userSession={userSession}
+                onConnectDrive={handleGoogleLogin}
               />
             )}
           </>

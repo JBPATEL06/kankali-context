@@ -22,6 +22,7 @@ const provider = new GoogleAuthProvider();
 // Google Drive scopes
 provider.addScope('https://www.googleapis.com/auth/drive.file');
 provider.addScope('https://www.googleapis.com/auth/drive.readonly');
+provider.addScope('https://www.googleapis.com/auth/drive.appdata');
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
@@ -85,6 +86,7 @@ export const initAuth = (
 };
 
 export const googleSignIn = async (): Promise<{ user: User; accessToken: string; tokenExpiresAt: string } | null> => {
+  if (isSigningIn) return null;
   try {
     isSigningIn = true;
     const result = await signInWithPopup(auth, provider);
