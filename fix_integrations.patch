@@ -1,0 +1,27 @@
+--- src/components/IntegrationsTab.tsx
++++ src/components/IntegrationsTab.tsx
+@@ -25,9 +25,9 @@
+           if (cfg) {
+             if (cfg.githubRepo) setGhRepo(cfg.githubRepo);
+             if (cfg.githubBranch) setGhBranch(cfg.githubBranch);
+-            if (cfg.githubToken || cfg.encryptedGithubToken) {
+-              setGhToken(cfg.githubToken || 'encrypted');
++            if (cfg.githubToken) {
++              setGhToken(cfg.githubToken);
+               setIsGhConnected(true);
+             }
+           }
+         } catch (e) {
+@@ -43,9 +43,9 @@
+     try {
+       if (userSession?.uid) {
+         await saveGithubDataToFirestore(userSession.uid, {
+-          githubRepo: ghRepo,
+-          githubBranch: ghBranch,
+-          githubToken: ghToken,
++          repo: ghRepo,
++          branch: ghBranch,
++          token: ghToken,
+         });
+         setIsGhConnected(true);
+       }

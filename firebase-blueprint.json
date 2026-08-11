@@ -1,0 +1,31 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User specific configuration, GitHub integration credentials, and Google Drive OAuth token data.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "displayName": { "type": "string", "maxLength": 256 },
+        "googleAccessToken": { "type": "string", "maxLength": 2048 },
+        "googleTokenExpiresAt": { "type": "string", "maxLength": 128 },
+        "mcpStorageMode": { "type": "string", "maxLength": 64 },
+        "githubRepo": { "type": "string", "maxLength": 256 },
+        "githubBranch": { "type": "string", "maxLength": 128 },
+        "githubToken": { "type": "string", "maxLength": 512 },
+        "githubTokenExpiresAt": { "type": "string", "maxLength": 128 },
+        "githubUsername": { "type": "string", "maxLength": 128 },
+        "lastSyncedAt": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["userId", "email"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User config and integration credentials stored securely per user."
+    }
+  }
+}

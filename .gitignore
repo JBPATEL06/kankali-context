@@ -1,0 +1,33 @@
+# Dependency directories
+node_modules/
+
+# Build & compiler outputs
+dist/
+build/
+server.js
+
+# Local environment & secret files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local.json
+
+# OS metadata & caches
+.DS_Store
+Thumbs.db
+npm-debug.log*
+*.log
+
+# IDE & Editor settings
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Kankali Local config folder
+.kankali/
