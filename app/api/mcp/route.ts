@@ -97,7 +97,7 @@ const handler = createMcpHandler((server) => {
     "list_domains",
     {
       description: "List context domains under /domains/ in the user's GitHub repo.",
-      inputSchema: listDomainsSchema,
+      inputSchema: listDomainsSchema.shape,
     },
     withUser(listDomainsSchema, async (cfg) => toolListDomains(cfg))
   );
@@ -106,7 +106,7 @@ const handler = createMcpHandler((server) => {
     "read_context",
     {
       description: "Read stored context for a domain from the user's GitHub repo.",
-      inputSchema: readContextSchema,
+      inputSchema: readContextSchema.shape,
     },
     withUser(readContextSchema, async (cfg, args) => toolReadContext(cfg, args))
   );
@@ -116,7 +116,7 @@ const handler = createMcpHandler((server) => {
     {
       description:
         "Write context for a domain into the user's GitHub repo. Origin optional (claude|grok|user).",
-      inputSchema: writeContextSchema,
+      inputSchema: writeContextSchema.shape,
     },
     withUser(writeContextSchema, async (cfg, args) =>
       toolWriteContext(cfg, args, "user" as Origin)
@@ -127,7 +127,7 @@ const handler = createMcpHandler((server) => {
     "search_context",
     {
       description: "Keyword search across the user's stored markdown context files.",
-      inputSchema: searchContextSchema,
+      inputSchema: searchContextSchema.shape,
     },
     withUser(searchContextSchema, async (cfg, args) => toolSearchContext(cfg, args))
   );
