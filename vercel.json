@@ -1,0 +1,16 @@
+{
+  "functions": {
+    "app/api/mcp/route.ts": { "maxDuration": 30 },
+    "app/api/cron/token-expiry/route.ts": { "maxDuration": 60 }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/token-expiry",
+      "schedule": "0 9 * * *"
+    }
+  ],
+  "rewrites": [
+    { "source": "/mcp", "destination": "/api/mcp" },
+    { "source": "/mcp/(.*)", "destination": "/api/mcp" }
+  ]
+}
