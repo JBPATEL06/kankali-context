@@ -6,6 +6,8 @@ import { sendTokenExpiryEmail } from "@/lib/email";
  * Vercel Cron — daily at 09:00 UTC (see vercel.json).
  * Protected by CRON_SECRET header.
  */
+
+export const maxDuration = 60;
 export async function GET(req: Request) {
   const auth = req.headers.get("authorization");
   const secret = process.env.CRON_SECRET;

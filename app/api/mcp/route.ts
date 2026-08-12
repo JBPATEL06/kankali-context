@@ -8,6 +8,8 @@ import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
 import { getUserByMcpKey, resolveGithubConfig } from "@/lib/users";
 import {
+
+export const maxDuration = 30;
   listDomainsSchema,
   toolListDomains,
   readContextSchema,
