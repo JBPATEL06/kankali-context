@@ -1,6 +1,0 @@
-{
-  "name": "Agentic AI Context Hub",
-  "description": "Secure cross-platform context memory hub and user file manager for AI agents backed by Google Drive storage.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
