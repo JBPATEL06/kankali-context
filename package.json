@@ -1,6 +1,6 @@
 {
   "name": "kankali",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Multi-user MCP memory layer \u2014 each user stores context in their own GitHub repo",
   "private": true,
   "scripts": {

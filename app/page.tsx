@@ -9,6 +9,7 @@ export default function Home() {
   return (
     <main style={{ maxWidth: 720, margin: "4rem auto", padding: "0 1.5rem", lineHeight: 1.6 }}>
       <h1 style={{ color: "#7dba6a", fontWeight: 600 }}>Kankali</h1>
+      {/* Build marker 2026-08-12 */}
       <p style={{ opacity: 0.85 }}>
         Portable memory layer for AI assistants. Sign in, connect <em>your</em> GitHub
         repo, and every AI (Claude, Grok, …) shares the same context via MCP.
