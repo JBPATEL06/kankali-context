@@ -1,12 +1,15 @@
 /**
  * Multi-user MCP endpoint.
- * Auth: Bearer / X-API-Key = user's mcpApiKey from Firestore.
+ * Auth (either):
+ *   - Authorization: Bearer <mcpApiKey>   (Claude Code / Cursor / Grok config)
+ *   - Authorization: Bearer <oauth JWT>   (Claude web custom connector after OAuth)
+ *   - X-API-Key: <mcpApiKey>
  * GitHub ops use that user's encrypted PAT.
  */
 
 import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
-import { getUserByMcpKey, resolveGithubConfig } from "@/lib/users";
+import { getUser, getUserByMcpKey, resolveGithubConfig } from "@/lib/users";
 import {
   listDomainsSchema,
   toolListDomains,
@@ -17,11 +20,14 @@ import {
   searchContextSchema,
   toolSearchContext,
 } from "@/lib/tools";
+import {
+  appOrigin,
+  resolveBearerToUid,
+} from "@/lib/oauth";
 import type { GithubConfig, Origin, UserRecord } from "@/types";
 
 export const maxDuration = 30;
 
-let currentRequest: Request | null = null;
 let currentUser: UserRecord | null = null;
 let currentCfg: GithubConfig | null = null;
 
@@ -31,19 +37,49 @@ function extractApiKey(req: Request): string | null {
   return req.headers.get("x-api-key")?.trim() || null;
 }
 
+function unauthorizedResponse(message: string): Response {
+  const origin = appOrigin();
+  const meta = `${origin}/.well-known/oauth-protected-resource`;
+  return new Response(JSON.stringify({ error: message }), {
+    status: 401,
+    headers: {
+      "Content-Type": "application/json",
+      "WWW-Authenticate": `Bearer realm="kankali", resource_metadata="${meta}"`,
+      "Access-Control-Allow-Origin": "*",
+    },
+  });
+}
+
 async function resolveCaller(req: Request): Promise<{
   user: UserRecord;
   cfg: GithubConfig;
 }> {
   const key = extractApiKey(req);
   if (!key) {
-    throw new Error(
-      "Unauthorized: pass your Kankali MCP API key as Authorization: Bearer <key> or X-API-Key."
-    );
+    throw new Error("UNAUTHORIZED");
   }
+
+  const oauth = await resolveBearerToUid(key);
+  if (oauth) {
+    const user = await getUser(oauth.uid);
+    if (!user) throw new Error("Unauthorized: user not found for token.");
+    const cfg = resolveGithubConfig(user);
+    if (!cfg) {
+      throw new Error(
+        "GitHub not connected. Sign in at the Kankali dashboard and save your GitHub token + repo under Settings."
+      );
+    }
+    if (user.tokenExpiresAt && Date.parse(user.tokenExpiresAt) < Date.now()) {
+      throw new Error(
+        "Your GitHub token has expired. Update it in the Kankali Settings page."
+      );
+    }
+    return { user, cfg };
+  }
+
   const user = await getUserByMcpKey(key);
   if (!user) {
-    throw new Error("Unauthorized: invalid MCP API key.");
+    throw new Error("Unauthorized: invalid MCP API key or access token.");
   }
   const cfg = resolveGithubConfig(user);
   if (!cfg) {
@@ -51,7 +87,6 @@ async function resolveCaller(req: Request): Promise<{
       "GitHub not connected. Sign in at the Kankali dashboard and save your GitHub token + repo under Settings."
     );
   }
-  // Soft warning if expired
   if (user.tokenExpiresAt && Date.parse(user.tokenExpiresAt) < Date.now()) {
     throw new Error(
       "Your GitHub token has expired. Update it in the Kankali Settings page."
@@ -76,7 +111,12 @@ function withUser<T extends z.ZodTypeAny>(
     try {
       if (!currentCfg || !currentUser) {
         return {
-          content: [{ type: "text" as const, text: "Internal: no request context" }],
+          content: [
+            {
+              type: "text" as const,
+              text: "Unauthorized: connect via OAuth or pass your MCP API key.",
+            },
+          ],
           isError: true,
         };
       }
@@ -134,27 +174,40 @@ const handler = createMcpHandler((server) => {
 });
 
 async function wrappedHandler(req: Request): Promise<Response> {
-  currentRequest = req;
   currentUser = null;
   currentCfg = null;
+
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers":
+          "Content-Type, Authorization, X-API-Key, Accept, Mcp-Session-Id",
+        "Access-Control-Expose-Headers": "Mcp-Session-Id, WWW-Authenticate",
+      },
+    });
+  }
+
   try {
-    // Resolve auth early so initialize + tools all share context
     try {
       const resolved = await resolveCaller(req);
       currentUser = resolved.user;
       currentCfg = resolved.cfg;
     } catch (err) {
-      // For protocol handshake methods without auth, mcp-handler still needs a response.
-      // Tool calls will fail clearly inside withUser if cfg is null.
-      // We still attempt; if key missing, tools return error text.
-      if (req.method === "POST") {
-        // Allow initialize without full github setup by not throwing here —
-        // actual tool invocations check currentCfg.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg === "UNAUTHORIZED") {
+        return unauthorizedResponse(
+          "Authentication required. Use OAuth (Claude web) or Authorization: Bearer <mcpApiKey>."
+        );
       }
     }
-    return await handler(req);
+    const res = await handler(req);
+    const headers = new Headers(res.headers);
+    headers.set("Access-Control-Allow-Origin", "*");
+    return new Response(res.body, { status: res.status, headers });
   } finally {
-    currentRequest = null;
     currentUser = null;
     currentCfg = null;
   }
