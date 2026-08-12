@@ -12,13 +12,18 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async signIn({ user, account }) {
       if (!user.email || !account) return false;
-      // Firebase-style uid: prefer Google sub, fall back to email hash
       const uid = account.providerAccountId || user.id || user.email;
-      await upsertUserFromAuth({
-        uid: String(uid),
-        email: user.email,
-        name: user.name ?? undefined,
-      });
+      try {
+        await upsertUserFromAuth({
+          uid: String(uid),
+          email: user.email,
+          name: user.name ?? undefined,
+        });
+      } catch (err) {
+        // Do not block Google login if Firestore is misconfigured —
+        // user can still land on the app; settings will retry profile create.
+        console.error("[kankali] upsertUserFromAuth failed:", err);
+      }
       return true;
     },
     async jwt({ token, account, user }) {

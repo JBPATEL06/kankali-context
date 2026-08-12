@@ -10,7 +10,15 @@ function init(): App {
   // Prefer JSON blob env var (Vercel); fall back to individual fields
   const json = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   if (json) {
-    const sa = JSON.parse(json);
+    let sa: { project_id: string; client_email: string; private_key: string };
+    try {
+      sa = JSON.parse(json);
+    } catch (e) {
+      throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON");
+    }
+    if (!sa.project_id || !sa.client_email || !sa.private_key) {
+      throw new Error("FIREBASE_SERVICE_ACCOUNT_JSON missing project_id/client_email/private_key");
+    }
     app = initializeApp({
       credential: cert({
         projectId: sa.project_id,
