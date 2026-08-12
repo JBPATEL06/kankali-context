@@ -8,8 +8,6 @@ import { createMcpHandler } from "mcp-handler";
 import { z } from "zod";
 import { getUserByMcpKey, resolveGithubConfig } from "@/lib/users";
 import {
-
-export const maxDuration = 30;
   listDomainsSchema,
   toolListDomains,
   readContextSchema,
@@ -20,6 +18,8 @@ export const maxDuration = 30;
   toolSearchContext,
 } from "@/lib/tools";
 import type { GithubConfig, Origin, UserRecord } from "@/types";
+
+export const maxDuration = 30;
 
 let currentRequest: Request | null = null;
 let currentUser: UserRecord | null = null;
