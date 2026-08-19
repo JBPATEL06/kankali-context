@@ -1,0 +1,18 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/token-expiry",
+      "schedule": "0 9 * * *"
+    }
+  ],
+  "rewrites": [
+    { "source": "/mcp/git", "destination": "/api/mcp/git" },
+    { "source": "/mcp/git/(.*)", "destination": "/api/mcp/git" },
+    { "source": "/mcp/Drive", "destination": "/api/mcp/Drive" },
+    { "source": "/mcp/Drive/(.*)", "destination": "/api/mcp/Drive" },
+    { "source": "/mcp/master", "destination": "/api/mcp/master" },
+    { "source": "/mcp/master/(.*)", "destination": "/api/mcp/master" },
+    { "source": "/mcp", "destination": "/api/mcp/master" },
+    { "source": "/mcp/(.*)", "destination": "/api/mcp/master" }
+  ]
+}

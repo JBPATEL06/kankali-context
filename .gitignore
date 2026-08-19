@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Testing
+/coverage
+
+# Next.js build output
+/.next/
+/out/
+.vercel/
+
+# Production
+/build
+/dist
+
+# Security & Private Credentials
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
+*.pem
+serviceAccount.json
+*-client_secret*.json
+
+# Internal Session & Context Docs
+docs/
+reply/
+scratch/
+
+# Verification & Root files
+google*.html
+!public/google*.html
+
+# Misc
+.DS_Store
+*.pem
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.turbo
+*.tsbuildinfo
+next-env.d.ts
