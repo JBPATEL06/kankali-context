@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BrandLogo } from "@/components/BrandLogo";
+import { Navbar } from "@/components/Navbar";
 import { CheckIcon, SparklesIcon, GoogleDriveIcon, GithubIcon, ShieldIcon } from "@/components/Icons";
 
 export const metadata = {
@@ -17,19 +17,10 @@ export default function StatusPage() {
   ];
 
   return (
-    <div className="page-container" style={{ maxWidth: "860px", margin: "0 auto", padding: "2rem 1.5rem 4rem" }}>
-      <header className="app-navbar" style={{ marginBottom: "2rem" }}>
-        <Link href="/" className="nav-brand">
-          <BrandLogo size={22} />
-          <span>Kankali</span>
-        </Link>
-        <nav className="nav-links">
-          <Link href="/" className="nav-link">Home</Link>
-          <Link href="/architecture" className="nav-link">Architecture</Link>
-          <Link href="/security" className="nav-link">Security</Link>
-          <Link href="/docs" className="nav-link">Docs</Link>
-        </nav>
-      </header>
+    <div>
+      <Navbar />
+      <div className="page-container" style={{ maxWidth: "860px", margin: "0 auto", padding: "2rem 1.5rem 4rem" }}>
+
 
       <div className="card" style={{ padding: "2.5rem 2rem", lineHeight: "1.7" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "1rem", marginBottom: "1.5rem" }}>
@@ -83,6 +74,7 @@ export default function StatusPage() {
           <Link href="/architecture" style={{ color: "var(--primary)", fontSize: "0.9rem", fontWeight: 600 }}>Architecture Vault →</Link>
         </div>
       </div>
+    </div>
     </div>
   );
 }

@@ -3,7 +3,7 @@
 import { useSession, signIn, signOut } from "next-auth/react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { BrandLogo } from "@/components/BrandLogo";
+import { Navbar } from "@/components/Navbar";
 import { AuthModal } from "@/components/AuthModal";
 import { VaultExplorer } from "@/components/VaultExplorer";
 import {
@@ -43,34 +43,21 @@ export default function ArchitecturePage() {
 
   if (status === "loading") {
     return (
-      <main className="page-container" style={{ textAlign: "center", paddingTop: "5rem" }}>
-        <div className="live-pill">
-          <span className="live-pill__dot"></span> Loading Kankali Architecture…
-        </div>
-      </main>
+      <div>
+        <Navbar />
+        <main className="page-container" style={{ textAlign: "center", paddingTop: "5rem" }}>
+          <div className="live-pill">
+            <span className="live-pill__dot"></span> Loading Kankali Architecture…
+          </div>
+        </main>
+      </div>
     );
   }
 
   if (status === "unauthenticated") {
     return (
       <div>
-        <header className="app-navbar">
-          <Link href="/" className="nav-brand">
-            <BrandLogo size={22} />
-            <span>Kankali</span>
-          </Link>
-          <nav className="nav-links">
-            <Link href="/" className="nav-link">
-              Protocol
-            </Link>
-            <Link href="/architecture" className="nav-link nav-link--active">
-              Architecture
-            </Link>
-            <Link href="/docs" className="nav-link">
-              Documentation
-            </Link>
-          </nav>
-        </header>
+        <Navbar />
 
         <main className="page-container" style={{ maxWidth: "28rem", paddingTop: "4rem" }}>
           <div className="card card--login" style={{ textAlign: "center" }}>
@@ -114,34 +101,8 @@ export default function ArchitecturePage() {
 
   return (
     <div>
-      {/* Top Navbar */}
-      <header className="app-navbar">
-        <Link href="/" className="nav-brand">
-          <BrandLogo size={22} />
-          <span>Kankali</span>
-        </Link>
+      <Navbar />
 
-        <nav className="nav-links">
-          <Link href="/" className="nav-link">
-            Protocol
-          </Link>
-          <Link href="/architecture" className="nav-link nav-link--active">
-            Architecture
-          </Link>
-          <Link href="/settings" className="nav-link">
-            Settings
-          </Link>
-          <Link href="/docs" className="nav-link">
-            Documentation
-          </Link>
-        </nav>
-
-        <div className="nav-actions">
-          <button type="button" onClick={() => signOut()} className="nav-signin-link" style={{ opacity: 0.7 }}>
-            Sign Out
-          </button>
-        </div>
-      </header>
 
       <main className="page-container" style={{ maxWidth: "96rem", paddingLeft: "1.5rem", paddingRight: "1.5rem" }}>
         {/* Title Header */}

@@ -1,10 +1,9 @@
 "use client";
 
-import { signIn, signOut, useSession } from "next-auth/react";
-import Link from "next/link";
 import { useState } from "react";
-import { BrandLogo } from "@/components/BrandLogo";
-import { AuthModal } from "@/components/AuthModal";
+import Link from "next/link";
+import { useSession, signIn } from "next-auth/react";
+import { Navbar } from "@/components/Navbar";
 import {
   ShieldIcon,
   KeyIcon,
@@ -18,10 +17,8 @@ import {
 } from "@/components/Icons";
 
 export default function Home() {
-  const { data: session, status } = useSession();
+  const { status } = useSession();
   const [copied, setCopied] = useState(false);
-  const [authModalOpen, setAuthModalOpen] = useState(false);
-  const [authModalMode, setAuthModalMode] = useState<"signin" | "signup">("signin");
 
   const connectorUrl = "https://kankali-context.vercel.app/mcp/master";
 
@@ -31,100 +28,9 @@ export default function Home() {
     setTimeout(() => setCopied(false), 2200);
   }
 
-  function openAuth(mode: "signin" | "signup") {
-    setAuthModalMode(mode);
-    setAuthModalOpen(true);
-  }
-
   return (
     <div>
-      <AuthModal
-        isOpen={authModalOpen}
-        onClose={() => setAuthModalOpen(false)}
-        initialMode={authModalMode}
-      />
-
-      {/* Top Navigation Bar */}
-      <header className="app-navbar">
-        <Link href="/" className="nav-brand">
-          <BrandLogo size={22} />
-          <span>Kankali Context</span>
-        </Link>
-
-        <nav className="nav-links">
-          <Link href="/" className="nav-link nav-link--active">
-            Protocol
-          </Link>
-          <Link href="/architecture" className="nav-link">
-            Architecture
-          </Link>
-          <Link href="/security" className="nav-link">
-            Security &amp; Audit
-          </Link>
-          <Link href="/docs" className="nav-link">
-            Docs
-          </Link>
-          <Link href="/status" className="nav-link">
-            Status
-          </Link>
-        </nav>
-
-        <div className="nav-actions">
-          <a
-            href="https://github.com/JBPATEL06/kankali-context"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn-tonal"
-            style={{ display: "flex", alignItems: "center", gap: "0.35rem", fontSize: "0.8rem", padding: "0.35rem 0.65rem", textDecoration: "none" }}
-          >
-            <GithubIcon size={14} /> Open Source
-          </a>
-
-          {status === "unauthenticated" && (
-            <>
-              <button
-                type="button"
-                onClick={() => openAuth("signin")}
-                className="nav-signin-link"
-              >
-                Sign In
-              </button>
-              <button
-                type="button"
-                onClick={() => openAuth("signup")}
-                className="btn-launch"
-              >
-                Launch App
-              </button>
-            </>
-          )}
-
-          {status === "authenticated" && (
-            <>
-              <Link href="/settings" className="nav-signin-link">
-                Dashboard ({session?.user?.email?.split("@")[0]})
-              </Link>
-              <button
-                type="button"
-                onClick={() => signOut()}
-                className="nav-signin-link"
-                style={{ opacity: 0.7 }}
-              >
-                Sign Out
-              </button>
-              <Link href="/settings" className="btn-launch">
-                Vault Settings
-              </Link>
-            </>
-          )}
-
-          {status === "loading" && (
-            <span className="live-pill" style={{ margin: 0, padding: "0.25rem 0.65rem" }}>
-              <span className="live-pill__dot"></span> Loading…
-            </span>
-          )}
-        </div>
-      </header>
+      <Navbar />
 
       <main className="page-container">
         {/* Hero Section */}
@@ -154,7 +60,7 @@ export default function Home() {
             ) : (
               <button
                 type="button"
-                onClick={() => openAuth("signin")}
+                onClick={() => signIn("google")}
                 className="btn-hero-google"
               >
                 <SparklesIcon size={15} color="currentColor" />

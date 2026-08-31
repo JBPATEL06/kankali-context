@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { BrandLogo } from "@/components/BrandLogo";
+import { Navbar } from "@/components/Navbar";
 import { ShieldIcon, KeyIcon, CodeIcon, CheckIcon, GithubIcon, GoogleDriveIcon } from "@/components/Icons";
 
 export const metadata = {
@@ -9,19 +9,10 @@ export const metadata = {
 
 export default function SecurityPage() {
   return (
-    <div className="page-container" style={{ maxWidth: "920px", margin: "0 auto", padding: "2rem 1.5rem 4rem" }}>
-      <header className="app-navbar" style={{ marginBottom: "2rem" }}>
-        <Link href="/" className="nav-brand">
-          <BrandLogo size={22} />
-          <span>Kankali</span>
-        </Link>
-        <nav className="nav-links">
-          <Link href="/" className="nav-link">Home</Link>
-          <Link href="/architecture" className="nav-link">Architecture</Link>
-          <Link href="/docs" className="nav-link">Docs</Link>
-          <Link href="/status" className="nav-link">Status</Link>
-        </nav>
-      </header>
+    <div>
+      <Navbar />
+      <div className="page-container" style={{ maxWidth: "920px", margin: "0 auto", padding: "2rem 1.5rem 4rem" }}>
+
 
       <div className="card" style={{ padding: "2.5rem 2rem", lineHeight: "1.7" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "0.5rem" }}>
@@ -145,6 +136,7 @@ export default function SecurityPage() {
           <Link href="/status" style={{ color: "var(--primary)", fontSize: "0.9rem", fontWeight: 600 }}>Live Service Status →</Link>
         </div>
       </div>
+    </div>
     </div>
   );
 }
