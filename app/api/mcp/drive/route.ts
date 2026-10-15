@@ -13,6 +13,7 @@ import { appOrigin, resolveBearerToUid } from "@/lib/oauth";
 import { decrypt } from "@/lib/crypto";
 import { refreshGoogleToken } from "@/lib/drive-fs";
 import { verifyMasterToken } from "@/lib/master-token";
+import { checkRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import type { UserRecord } from "@/types";
 import {
   readNoticeSchema,
@@ -71,8 +72,8 @@ function extractApiKey(req: Request): string | null {
 
 function unauthorizedResponse(message: string, req?: Request): Response {
   const origin = appOrigin(req);
-  const meta = `${origin}/.well-known/oauth-protected-resource/mcp/Drive`;
-  const resource = `${origin}/mcp/Drive`;
+  const meta = `${origin}/.well-known/oauth-protected-resource/mcp/drive`;
+  const resource = `${origin}/mcp/drive`;
   return new Response(
     JSON.stringify({
       error: "unauthorized",
@@ -354,6 +355,14 @@ async function wrappedHandler(req: Request): Promise<Response> {
         "Access-Control-Expose-Headers": "Mcp-Session-Id, WWW-Authenticate",
       },
     });
+  }
+
+  const rateLimit = await checkRateLimit(req, "mcp:drive", {
+    windowMs: 60_000,
+    maxRequests: 120,
+  });
+  if (!rateLimit.allowed) {
+    return rateLimitResponse(rateLimit.retryAfterSeconds);
   }
 
   const method = await peekJsonRpcMethod(req);

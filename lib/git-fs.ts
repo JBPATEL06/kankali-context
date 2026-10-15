@@ -136,6 +136,32 @@ export async function readFile(
   }
 }
 
+/**
+ * Executes a Git write/delete action with automatic exponential backoff retry on HTTP 409 Conflict.
+ * Prevents race condition failures when multiple agents or parallel tool calls commit simultaneously.
+ */
+async function retryOnConflict<T>(
+  action: () => Promise<T>,
+  maxRetries = 3,
+  baseDelayMs = 250
+): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await action();
+    } catch (err: unknown) {
+      attempt++;
+      const status = (err as { status?: number })?.status;
+      if (status === 409 && attempt <= maxRetries) {
+        const delay = baseDelayMs * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 100);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 export async function writeFile(
   cfg: GithubConfig,
   path: string,
@@ -144,34 +170,37 @@ export async function writeFile(
 ): Promise<{ path: string; sha: string }> {
   const p = safePath(path);
   const octokit = client(cfg.token);
-  let sha: string | undefined;
-  try {
-    const { data } = await octokit.rest.repos.getContent({
+  const today = new Date().toISOString().slice(0, 10);
+
+  return retryOnConflict(async () => {
+    let sha: string | undefined;
+    try {
+      const { data } = await octokit.rest.repos.getContent({
+        owner: cfg.owner,
+        repo: cfg.repo,
+        path: p,
+        ref: cfg.branch,
+      });
+      if (!Array.isArray(data) && data.type === "file" && "sha" in data) {
+        sha = data.sha;
+      }
+    } catch (err: unknown) {
+      if ((err as { status?: number })?.status !== 404) throw err;
+    }
+
+    const payload: Parameters<typeof octokit.rest.repos.createOrUpdateFileContents>[0] = {
       owner: cfg.owner,
       repo: cfg.repo,
       path: p,
-      ref: cfg.branch,
-    });
-    if (!Array.isArray(data) && data.type === "file" && "sha" in data) {
-      sha = data.sha;
-    }
-  } catch (err: unknown) {
-    if ((err as { status?: number })?.status !== 404) throw err;
-  }
+      message: message || today,
+      content: toBase64(content),
+      branch: cfg.branch,
+    };
+    if (sha) payload.sha = sha;
 
-  const today = new Date().toISOString().slice(0, 10);
-  const payload: Parameters<typeof octokit.rest.repos.createOrUpdateFileContents>[0] = {
-    owner: cfg.owner,
-    repo: cfg.repo,
-    path: p,
-    message: message || today,
-    content: toBase64(content),
-    branch: cfg.branch,
-  };
-  if (sha) payload.sha = sha;
-
-  const { data } = await octokit.rest.repos.createOrUpdateFileContents(payload);
-  return { path: p, sha: data.content?.sha ?? "" };
+    const { data } = await octokit.rest.repos.createOrUpdateFileContents(payload);
+    return { path: p, sha: data.content?.sha ?? "" };
+  });
 }
 
 export async function deleteFile(
@@ -181,30 +210,33 @@ export async function deleteFile(
 ): Promise<{ path: string; deleted: boolean }> {
   const p = safePath(path);
   const octokit = client(cfg.token);
-  try {
-    const { data } = await octokit.rest.repos.getContent({
-      owner: cfg.owner,
-      repo: cfg.repo,
-      path: p,
-      ref: cfg.branch,
-    });
-    if (Array.isArray(data) || data.type !== "file" || !("sha" in data)) {
-      return { path: p, deleted: false };
+  const todayDel = new Date().toISOString().slice(0, 10);
+
+  return retryOnConflict(async () => {
+    try {
+      const { data } = await octokit.rest.repos.getContent({
+        owner: cfg.owner,
+        repo: cfg.repo,
+        path: p,
+        ref: cfg.branch,
+      });
+      if (Array.isArray(data) || data.type !== "file" || !("sha" in data)) {
+        return { path: p, deleted: false };
+      }
+      await octokit.rest.repos.deleteFile({
+        owner: cfg.owner,
+        repo: cfg.repo,
+        path: p,
+        message: message || todayDel,
+        sha: data.sha,
+        branch: cfg.branch,
+      });
+      return { path: p, deleted: true };
+    } catch (err: unknown) {
+      if ((err as { status?: number })?.status === 404) return { path: p, deleted: false };
+      throw err;
     }
-    const todayDel = new Date().toISOString().slice(0, 10);
-    await octokit.rest.repos.deleteFile({
-      owner: cfg.owner,
-      repo: cfg.repo,
-      path: p,
-      message: message || todayDel,
-      sha: data.sha,
-      branch: cfg.branch,
-    });
-    return { path: p, deleted: true };
-  } catch (err: unknown) {
-    if ((err as { status?: number })?.status === 404) return { path: p, deleted: false };
-    throw err;
-  }
+  });
 }
 
 export async function deleteFolder(

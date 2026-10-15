@@ -23,6 +23,7 @@ import {
   toolSearchContext,
 } from "@/lib/tools";
 import { appOrigin, resolveBearerToUid } from "@/lib/oauth";
+import { checkRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import type { GithubConfig, Origin, UserRecord } from "@/types";
 
 interface RequestContext {
@@ -225,6 +226,14 @@ async function wrappedHandler(req: Request): Promise<Response> {
         "Access-Control-Expose-Headers": "Mcp-Session-Id, WWW-Authenticate",
       },
     });
+  }
+
+  const rateLimit = await checkRateLimit(req, "mcp:v1", {
+    windowMs: 60_000,
+    maxRequests: 120,
+  });
+  if (!rateLimit.allowed) {
+    return rateLimitResponse(rateLimit.retryAfterSeconds);
   }
 
   const method = await peekJsonRpcMethod(req);

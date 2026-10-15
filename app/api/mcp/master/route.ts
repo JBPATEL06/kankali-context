@@ -13,6 +13,7 @@ import { appOrigin, resolveBearerToUid } from "@/lib/oauth";
 import { decrypt } from "@/lib/crypto";
 import { refreshGoogleToken } from "@/lib/drive-fs";
 import { verifyMasterToken } from "@/lib/master-token";
+import { checkRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import type { UserRecord } from "@/types";
 import {
   type MasterContext,
@@ -371,6 +372,14 @@ async function routeWithAuth(req: Request): Promise<Response> {
         "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key",
       },
     });
+  }
+
+  const rateLimit = await checkRateLimit(req, "mcp:master", {
+    windowMs: 60_000,
+    maxRequests: 120,
+  });
+  if (!rateLimit.allowed) {
+    return rateLimitResponse(rateLimit.retryAfterSeconds);
   }
 
   let caller: { user: UserRecord; masterCtx: MasterContext } | null = null;

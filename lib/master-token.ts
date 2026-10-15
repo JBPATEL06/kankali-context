@@ -1,9 +1,16 @@
 import crypto from "crypto";
 
-const MASTER_TOKEN_SECRET =
-  process.env.ENCRYPTION_KEY ||
-  process.env.NEXTAUTH_SECRET ||
-  "kankali-master-auth-secret-key-32b!";
+function getMasterTokenSecret(): string {
+  const secret = process.env.ENCRYPTION_KEY || process.env.NEXTAUTH_SECRET;
+  if (secret) return secret;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "FATAL: ENCRYPTION_KEY or NEXTAUTH_SECRET is required to sign and verify Master Auth Tokens in production."
+    );
+  }
+  // Local development / testing fallback only
+  return "kankali-dev-only-secret-do-not-use-in-production-32b!";
+}
 
 /**
  * Creates a stateless signed Master Auth Token with an explicit expiration timestamp.
@@ -14,7 +21,7 @@ export function createMasterToken(uid: string, expiresInDays = 30): string {
   const payload = `${uid}:${expiresAt}`;
   const b64 = Buffer.from(payload, "utf8").toString("base64url");
   const hmac = crypto
-    .createHmac("sha256", MASTER_TOKEN_SECRET)
+    .createHmac("sha256", getMasterTokenSecret())
     .update(`${expiresAt}.${b64}`)
     .digest("hex");
 
@@ -47,7 +54,7 @@ export function verifyMasterToken(token: string): { valid: boolean; uid?: string
   }
 
   const expectedHmac = crypto
-    .createHmac("sha256", MASTER_TOKEN_SECRET)
+    .createHmac("sha256", getMasterTokenSecret())
     .update(`${expiresAt}.${b64}`)
     .digest("hex");
 

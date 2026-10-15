@@ -105,13 +105,23 @@ export async function listAllDriveFiles(accessToken: string): Promise<DriveFile[
     size: f.size ? parseInt(f.size, 10) : undefined,
   }));
 
+  // Deduplicate files with the same name, keeping the newest one
+  const dedupedMap = new Map<string, DriveFile>();
+  for (const f of mapped) {
+    const existing = dedupedMap.get(f.name);
+    if (!existing || new Date(f.updatedAt).getTime() > new Date(existing.updatedAt).getTime()) {
+      dedupedMap.set(f.name, f);
+    }
+  }
+  const deduped = Array.from(dedupedMap.values());
+
   // Cache directory list for 15 seconds during active session bursts
   fileListCache.set(accessToken, {
-    files: mapped,
+    files: deduped,
     expiresAt: Date.now() + 15 * 1000,
   });
 
-  return mapped;
+  return deduped;
 }
 
 export async function listTree(
@@ -179,7 +189,7 @@ export async function getFileMetadata(accessToken: string, filename: string): Pr
   const clean = safePath(filename);
   const q = encodeURIComponent(`name='${clean}' and 'appDataFolder' in parents and trashed=false`);
   const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=${q}&spaces=appDataFolder&fields=files(id,name,appProperties,modifiedTime,size)&pageSize=1`,
+    `https://www.googleapis.com/drive/v3/files?q=${q}&spaces=appDataFolder&orderBy=modifiedTime desc&fields=files(id,name,appProperties,modifiedTime,size)&pageSize=10`,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
     }
@@ -192,12 +202,25 @@ export async function getFileMetadata(accessToken: string, filename: string): Pr
   const data = await res.json();
   if (!data.files || data.files.length === 0) return null;
 
-  const f = data.files[0];
+  // Most recent file according to modifiedTime desc
+  const primary = data.files[0];
+
+  // Self-heal: If concurrent writes created duplicates, asynchronously clean up the stale ones
+  if (data.files.length > 1) {
+    for (let i = 1; i < data.files.length; i++) {
+      const dupId = data.files[i].id;
+      fetch(`https://www.googleapis.com/drive/v3/files/${dupId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).catch(() => {});
+    }
+  }
+
   return {
-    id: f.id,
-    name: f.name,
-    updatedAt: f.appProperties?.updatedAt || f.modifiedTime,
-    size: f.size ? parseInt(f.size, 10) : undefined,
+    id: primary.id,
+    name: primary.name,
+    updatedAt: primary.appProperties?.updatedAt || primary.modifiedTime,
+    size: primary.size ? parseInt(primary.size, 10) : undefined,
   };
 }
 

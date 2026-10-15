@@ -34,12 +34,22 @@ export function appOrigin(req?: Request): string {
 }
 
 export function mcpResource(req?: Request): string {
-  return `${appOrigin(req)}/mcp/git`;
+  return `${appOrigin(req)}/mcp/master`;
 }
 
 /** Primary git MCP endpoint (NOTICE-first FS tools). */
 export function mcpGitResource(req?: Request): string {
   return `${appOrigin(req)}/mcp/git`;
+}
+
+/** Google Drive MCP endpoint. */
+export function mcpDriveResource(req?: Request): string {
+  return `${appOrigin(req)}/mcp/drive`;
+}
+
+/** Master unified MCP endpoint. */
+export function mcpMasterResource(req?: Request): string {
+  return `${appOrigin(req)}/mcp/master`;
 }
 
 /**

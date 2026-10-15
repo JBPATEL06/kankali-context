@@ -71,6 +71,31 @@ export async function readDomain(
   }
 }
 
+/**
+ * Executes an action with exponential backoff retry on HTTP 409 Conflict.
+ */
+async function retryOnConflict<T>(
+  action: () => Promise<T>,
+  maxRetries = 3,
+  baseDelayMs = 250
+): Promise<T> {
+  let attempt = 0;
+  while (true) {
+    try {
+      return await action();
+    } catch (err: unknown) {
+      attempt++;
+      const status = (err as { status?: number })?.status;
+      if (status === 409 && attempt <= maxRetries) {
+        const delay = baseDelayMs * Math.pow(2, attempt - 1) + Math.floor(Math.random() * 100);
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 export async function writeDomain(
   cfg: GithubConfig,
   params: { domain: string; body: string; origin: string; tags?: string[] }
@@ -78,52 +103,54 @@ export async function writeDomain(
   const slug = normalizeSlug(params.domain);
   const path = `domains/${slug}/${CONTEXT_FILENAME}`;
   const octokit = client(cfg.token);
+  const today = new Date().toISOString().slice(0, 10);
 
-  let existingSha: string | undefined;
-  let existingCreated: string | undefined;
-  try {
-    const { data } = await octokit.rest.repos.getContent({
+  return retryOnConflict(async () => {
+    let existingSha: string | undefined;
+    let existingCreated: string | undefined;
+    try {
+      const { data } = await octokit.rest.repos.getContent({
+        owner: cfg.owner,
+        repo: cfg.repo,
+        path,
+        ref: cfg.branch,
+      });
+      if (!Array.isArray(data) && data.type === "file" && "sha" in data) {
+        existingSha = data.sha;
+        if ("content" in data && data.content) {
+          const prev = parseMarkdown(fromBase64(data.content), path, data.sha);
+          existingCreated = prev.frontmatter.created;
+        }
+      }
+    } catch (err: unknown) {
+      if ((err as { status?: number })?.status !== 404) throw err;
+    }
+
+    const { raw, hash, frontmatter } = buildMarkdown(params.body, {
+      origin: params.origin,
+      domain: slug,
+      tags: params.tags,
+      created: existingCreated,
+    });
+
+    const payload: Parameters<typeof octokit.rest.repos.createOrUpdateFileContents>[0] = {
       owner: cfg.owner,
       repo: cfg.repo,
       path,
-      ref: cfg.branch,
-    });
-    if (!Array.isArray(data) && data.type === "file" && "sha" in data) {
-      existingSha = data.sha;
-      if ("content" in data && data.content) {
-        const prev = parseMarkdown(fromBase64(data.content), path, data.sha);
-        existingCreated = prev.frontmatter.created;
-      }
-    }
-  } catch (err: unknown) {
-    if ((err as { status?: number })?.status !== 404) throw err;
-  }
+      message: today,
+      content: toBase64(raw),
+      branch: cfg.branch,
+    };
+    if (existingSha) payload.sha = existingSha;
 
-  const { raw, hash, frontmatter } = buildMarkdown(params.body, {
-    origin: params.origin,
-    domain: slug,
-    tags: params.tags,
-    created: existingCreated,
+    const { data } = await octokit.rest.repos.createOrUpdateFileContents(payload);
+    return {
+      path,
+      sha: data.content?.sha ?? "",
+      hash,
+      updated: frontmatter.updated,
+    };
   });
-
-  const today = new Date().toISOString().slice(0, 10);
-  const payload: Parameters<typeof octokit.rest.repos.createOrUpdateFileContents>[0] = {
-    owner: cfg.owner,
-    repo: cfg.repo,
-    path,
-    message: today,
-    content: toBase64(raw),
-    branch: cfg.branch,
-  };
-  if (existingSha) payload.sha = existingSha;
-
-  const { data } = await octokit.rest.repos.createOrUpdateFileContents(payload);
-  return {
-    path,
-    sha: data.content?.sha ?? "",
-    hash,
-    updated: frontmatter.updated,
-  };
 }
 
 export async function appendActivityLog(cfg: GithubConfig, line: string): Promise<void> {
@@ -131,34 +158,36 @@ export async function appendActivityLog(cfg: GithubConfig, line: string): Promis
   const path = `activity-log/${today}.md`;
   const octokit = client(cfg.token);
 
-  let existingSha: string | undefined;
-  let existingContent = `# Activity log — ${today}\n\n`;
-  try {
-    const { data } = await octokit.rest.repos.getContent({
+  return retryOnConflict(async () => {
+    let existingSha: string | undefined;
+    let existingContent = `# Activity log — ${today}\n\n`;
+    try {
+      const { data } = await octokit.rest.repos.getContent({
+        owner: cfg.owner,
+        repo: cfg.repo,
+        path,
+        ref: cfg.branch,
+      });
+      if (!Array.isArray(data) && data.type === "file" && "content" in data) {
+        existingSha = data.sha;
+        existingContent = fromBase64(data.content);
+        if (!existingContent.endsWith("\n")) existingContent += "\n";
+      }
+    } catch (err: unknown) {
+      if ((err as { status?: number })?.status !== 404) throw err;
+    }
+
+    const payload: Parameters<typeof octokit.rest.repos.createOrUpdateFileContents>[0] = {
       owner: cfg.owner,
       repo: cfg.repo,
       path,
-      ref: cfg.branch,
-    });
-    if (!Array.isArray(data) && data.type === "file" && "content" in data) {
-      existingSha = data.sha;
-      existingContent = fromBase64(data.content);
-      if (!existingContent.endsWith("\n")) existingContent += "\n";
-    }
-  } catch (err: unknown) {
-    if ((err as { status?: number })?.status !== 404) throw err;
-  }
-
-  const payload: Parameters<typeof octokit.rest.repos.createOrUpdateFileContents>[0] = {
-    owner: cfg.owner,
-    repo: cfg.repo,
-    path,
-    message: today,
-    content: toBase64(existingContent + line + "\n"),
-    branch: cfg.branch,
-  };
-  if (existingSha) payload.sha = existingSha;
-  await octokit.rest.repos.createOrUpdateFileContents(payload);
+      message: today,
+      content: toBase64(existingContent + line + "\n"),
+      branch: cfg.branch,
+    };
+    if (existingSha) payload.sha = existingSha;
+    await octokit.rest.repos.createOrUpdateFileContents(payload);
+  });
 }
 
 export async function listMarkdownPaths(cfg: GithubConfig): Promise<string[]> {
