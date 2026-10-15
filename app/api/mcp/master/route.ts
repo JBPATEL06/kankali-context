@@ -63,13 +63,19 @@ function getRequestContext(): RequestContext {
 export const maxDuration = 30;
 
 function extractApiKey(req: Request): string | null {
+  const url = new URL(req.url);
+  const queryToken = url.searchParams.get("token") || url.searchParams.get("key");
+  if (queryToken && queryToken.startsWith("km_")) return queryToken.trim();
+
   const auth = req.headers.get("authorization");
-  if (auth?.toLowerCase().startsWith("bearer ")) return auth.slice(7).trim();
+  if (auth?.toLowerCase().startsWith("bearer ")) {
+    const bearer = auth.slice(7).trim();
+    if (bearer) return bearer;
+  }
   const apiKeyHeader = req.headers.get("x-api-key")?.trim();
   if (apiKeyHeader) return apiKeyHeader;
 
-  const url = new URL(req.url);
-  return url.searchParams.get("token") || url.searchParams.get("key") || null;
+  return queryToken?.trim() || null;
 }
 
 function unauthorizedResponse(message: string, req?: Request): Response {
@@ -89,7 +95,7 @@ function unauthorizedResponse(message: string, req?: Request): Response {
         "Cache-Control": "no-store",
         "WWW-Authenticate": `Bearer realm="kankali", error="invalid_token", error_description="${message.replace(/"/g, "'")}", resource_metadata="${meta}"`,
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Expose-Headers": "WWW-Authenticate",
+        "Access-Control-Expose-Headers": "WWW-Authenticate, Mcp-Session-Id",
       },
     }
   );
@@ -99,6 +105,25 @@ class AuthRequiredError extends Error {
   constructor(message = "Authentication required") {
     super(message);
     this.name = "AuthRequiredError";
+  }
+}
+
+function isPublicMethod(method: string | undefined): boolean {
+  if (!method) return false;
+  if (method === "initialize" || method === "initialized") return true;
+  if (method === "tools/list" || method === "prompts/list" || method === "resources/list")
+    return true;
+  if (method.startsWith("notifications/")) return true;
+  if (method === "ping") return true;
+  return false;
+}
+
+async function peekJsonRpcMethod(req: Request): Promise<string | undefined> {
+  try {
+    const body = (await req.clone().json()) as { method?: string };
+    return body?.method;
+  } catch {
+    return undefined;
   }
 }
 
@@ -157,7 +182,7 @@ async function resolveCaller(req: Request): Promise<{
   const gitCfg = resolveGithubConfig(user);
 
   if (!driveToken && !gitCfg) {
-    throw new AuthRequiredError(
+    throw new Error(
       "Neither Google Drive nor GitHub Storage Vault is connected. Connect at least one vault in Settings."
     );
   }
@@ -369,7 +394,9 @@ async function routeWithAuth(req: Request): Promise<Response> {
       headers: {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key",
+        "Access-Control-Allow-Headers":
+          "Content-Type, Authorization, X-API-Key, Accept, Mcp-Session-Id",
+        "Access-Control-Expose-Headers": "Mcp-Session-Id, WWW-Authenticate",
       },
     });
   }
@@ -382,17 +409,36 @@ async function routeWithAuth(req: Request): Promise<Response> {
     return rateLimitResponse(rateLimit.retryAfterSeconds);
   }
 
+  const method = await peekJsonRpcMethod(req);
+  const publicMethod = isPublicMethod(method);
+
   let caller: { user: UserRecord; masterCtx: MasterContext } | null = null;
   let authError: string | null = null;
 
   try {
     caller = await resolveCaller(req);
   } catch (err: unknown) {
-    if (err instanceof AuthRequiredError) {
-      return unauthorizedResponse(err.message, req);
-    }
     const msg = err instanceof Error ? err.message : String(err);
-    authError = `Auth error: ${msg}`;
+    authError = msg;
+
+    const isAuth =
+      err instanceof AuthRequiredError ||
+      msg === "UNAUTHORIZED" ||
+      /authentication required|oauth access token|invalid or rotated mcp|api key|unauthorized/i.test(
+        msg
+      );
+
+    if (!publicMethod && isAuth) {
+      return unauthorizedResponse(msg, req);
+    }
+  }
+
+  // tools/call without resolved user must not soft-fail — force reauth
+  if (!publicMethod && !caller?.user) {
+    return unauthorizedResponse(
+      authError || "Authentication required. Pass Authorization: Bearer <token> or ?token=<token>",
+      req
+    );
   }
 
   return requestContext.run(
@@ -405,6 +451,7 @@ async function routeWithAuth(req: Request): Promise<Response> {
       const res = await handler(req);
       const headers = new Headers(res.headers);
       headers.set("Access-Control-Allow-Origin", "*");
+      headers.set("Access-Control-Expose-Headers", "WWW-Authenticate, Mcp-Session-Id");
       return new Response(res.body, {
         status: res.status,
         statusText: res.statusText,
