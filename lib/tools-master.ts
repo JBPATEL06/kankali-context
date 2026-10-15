@@ -54,39 +54,35 @@ function textResult(text: string, isError = false): ToolResult {
 export const targetSchema = z
   .enum(["drive", "git", "both"])
   .optional()
-  .describe("Target storage vault: 'drive' (Google Drive), 'git' (GitHub), or 'both'.");
+  .describe("Target storage vault: 'git' (default), 'drive' (Google Drive scratchpad), or 'both'.");
+
+function resolveDefaultTarget(
+  ctx: MasterContext,
+  explicitTarget?: "drive" | "git" | "both"
+): "drive" | "git" | "both" {
+  if (explicitTarget) return explicitTarget;
+  if (ctx.gitCfg) return "git";
+  if (ctx.driveToken) return "drive";
+  return "git";
+}
 
 // 1. Notice
 export const masterReadNoticeSchema = z.object({});
 export async function toolMasterReadNotice(): Promise<ToolResult> {
-  const text = `# NOTICE — Kankali Master Unified Vault (Dual Cloud: Google Drive + GitHub)
+  const text = `# NOTICE — Kankali Master Vault (/mcp/master: Drive App Data + GitHub)
 
-You are connected to Kankali Master Vault (\`/mcp/master\`), which manages BOTH **Google Drive App Data** and **GitHub Storage Vault**.
+Session start, in order: read_notice → read_index → current_session_get.
 
-## Progressive Disclosure & Chunk Reading (Token Efficiency):
+- target: "git" (default) | "drive" (only if user says Drive/scratchpad) | "both" (only if user says both/sync everywhere).
+- Prefer short .md files. Update index.md when structure changes.
+- delete_path needs confirm_token (two-step). NOTICE.md cannot be deleted.
+
+Progressive Disclosure & Chunk Reading (Token Efficiency):
 - For large documents (>10 KB), call \`read_outline(path)\` to inspect the Table of Contents & Anchors (\`## [anchor] Section Title\`).
 - Use \`read_file(path, section: "<anchor>")\` to read ONLY that specific heading block (~1-3 KB instead of the full file).
 - Use \`write_file(path, content, section: "<anchor>")\` to replace ONLY that specific section block in-place.
 
-## Target Storage Directive
-Every tool accepts an optional \`target\` argument:
-- \`target: "drive"\` — Google Drive App Data (fast, invisible, private).
-- \`target: "git"\` — GitHub Repository (versioned, commits, team visibility).
-- \`target: "both"\` — Synchronize across both clouds simultaneously (default for durable facts and project creation).
-
-## AI Prompt Rule:
-- If the user specifies "on GitHub" or "in repo" -> use \`target: "git"\`.
-- If the user specifies "on Drive" or "quick scratchpad" -> use \`target: "drive"\`.
-- If the user says "both" or does not specify -> use \`target: "both"\` for project creation/session, or primary for reads.
-
-## Mandatory Flow:
-1. **read_notice** (this file) — required every session first.
-2. **read_index** — map of paths across vaults.
-3. **current_session_get** — what's live right now.
-4. Then use FS / project / session tools with \`target: "drive" | "git" | "both"\`.
-
-## Available Tools:
-\`read_notice\` · \`read_index\` · \`read_outline\` · \`list_tree\` · \`read_file\` · \`write_file\` · \`delete_path\` · \`search_files\` · \`project_upsert\` · \`project_codebase_note\` · \`project_get\` · \`project_list\` · \`current_session_set\` · \`current_session_get\`
+Tools: read_notice, read_index, list_tree, read_file, write_file, delete_path, search_files, project_upsert, project_codebase_note, project_get, project_list, current_session_set, current_session_get
 `;
   return textResult(text);
 }
@@ -99,14 +95,15 @@ export async function toolMasterReadIndex(
   ctx: MasterContext,
   args: z.infer<typeof masterReadIndexSchema>
 ): Promise<ToolResult> {
-  if (args.target === "git" && ctx.gitCfg) {
+  if (args.target === "drive" && ctx.driveToken) {
+    return driveReadIndex(ctx.driveToken);
+  }
+  // Default to Git first, fallback to Drive
+  if (ctx.gitCfg) {
     return gitReadIndex(ctx.gitCfg);
   }
   if (ctx.driveToken) {
     return driveReadIndex(ctx.driveToken);
-  }
-  if (ctx.gitCfg) {
-    return gitReadIndex(ctx.gitCfg);
   }
   return textResult("No connected vault available (neither Google Drive nor GitHub is linked).", true);
 }
@@ -190,13 +187,13 @@ export async function toolMasterReadFile(
     return driveReadFile(ctx.driveToken, args);
   }
 
-  // Auto-fallback: Try Drive first, then Git
-  if (ctx.driveToken) {
-    const dRes = await driveReadFile(ctx.driveToken, args);
-    if (!dRes.isError) return dRes;
-  }
+  // Default to Git first, then fallback to Drive
   if (ctx.gitCfg) {
-    return gitReadFile(ctx.gitCfg, args);
+    const gRes = await gitReadFile(ctx.gitCfg, args);
+    if (!gRes.isError) return gRes;
+  }
+  if (ctx.driveToken) {
+    return driveReadFile(ctx.driveToken, args);
   }
   return textResult(`File '${args.path}' could not be read from connected vaults.`, true);
 }
@@ -215,7 +212,7 @@ export async function toolMasterWriteFile(
   ctx: MasterContext,
   args: z.infer<typeof masterWriteFileSchema>
 ): Promise<ToolResult> {
-  const target = args.target || "both";
+  const target = resolveDefaultTarget(ctx, args.target);
   const messages: string[] = [];
 
   if ((target === "drive" || target === "both") && ctx.driveToken) {
@@ -243,7 +240,7 @@ export async function toolMasterDeletePath(
   ctx: MasterContext,
   args: z.infer<typeof masterDeletePathSchema>
 ): Promise<ToolResult> {
-  const target = args.target || "both";
+  const target = resolveDefaultTarget(ctx, args.target);
   const messages: string[] = [];
 
   if ((target === "drive" || target === "both") && ctx.driveToken) {
@@ -313,7 +310,7 @@ export async function toolMasterProjectUpsert(
   ctx: MasterContext,
   args: z.infer<typeof masterProjectUpsertSchema>
 ): Promise<ToolResult> {
-  const target = args.target || "both";
+  const target = resolveDefaultTarget(ctx, args.target);
   const messages: string[] = [];
 
   if ((target === "drive" || target === "both") && ctx.driveToken) {
@@ -342,7 +339,7 @@ export async function toolMasterProjectCodebaseNote(
   ctx: MasterContext,
   args: z.infer<typeof masterProjectCodebaseNoteSchema>
 ): Promise<ToolResult> {
-  const target = args.target || "both";
+  const target = resolveDefaultTarget(ctx, args.target);
   const messages: string[] = [];
 
   if ((target === "drive" || target === "both") && ctx.driveToken) {
@@ -374,12 +371,13 @@ export async function toolMasterProjectGet(
     return driveProjectGet(ctx.driveToken, args);
   }
 
-  if (ctx.driveToken) {
-    const dRes = await driveProjectGet(ctx.driveToken, args);
-    if (!dRes.isError) return dRes;
-  }
+  // Default to Git first, then fallback to Drive
   if (ctx.gitCfg) {
-    return gitProjectGet(ctx.gitCfg, args);
+    const gRes = await gitProjectGet(ctx.gitCfg, args);
+    if (!gRes.isError) return gRes;
+  }
+  if (ctx.driveToken) {
+    return driveProjectGet(ctx.driveToken, args);
   }
   return textResult(`Project '${args.slug}' could not be found.`, true);
 }
@@ -392,7 +390,7 @@ export async function toolMasterProjectList(
   ctx: MasterContext,
   args: z.infer<typeof masterProjectListSchema>
 ): Promise<ToolResult> {
-  const target = args.target || (ctx.driveToken ? "drive" : "git");
+  const target = resolveDefaultTarget(ctx, args.target);
   const outputs: string[] = [];
 
   if ((target === "drive" || target === "both") && ctx.driveToken) {
@@ -419,7 +417,7 @@ export async function toolMasterCurrentSessionSet(
   ctx: MasterContext,
   args: z.infer<typeof masterCurrentSessionSetSchema>
 ): Promise<ToolResult> {
-  const target = args.target || "both";
+  const target = resolveDefaultTarget(ctx, args.target);
   const messages: string[] = [];
 
   if ((target === "drive" || target === "both") && ctx.driveToken) {
@@ -449,12 +447,13 @@ export async function toolMasterCurrentSessionGet(
     return driveCurrentSessionGet(ctx.driveToken);
   }
 
-  if (ctx.driveToken) {
-    const dRes = await driveCurrentSessionGet(ctx.driveToken);
-    if (!dRes.isError) return dRes;
-  }
+  // Default to Git first, fallback to Drive
   if (ctx.gitCfg) {
-    return gitCurrentSessionGet(ctx.gitCfg);
+    const gRes = await gitCurrentSessionGet(ctx.gitCfg);
+    if (!gRes.isError) return gRes;
+  }
+  if (ctx.driveToken) {
+    return driveCurrentSessionGet(ctx.driveToken);
   }
   return textResult("No active session found.", true);
 }
