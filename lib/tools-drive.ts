@@ -315,9 +315,56 @@ export const searchFilesSchema = z.object({
   path_prefix: z
     .string()
     .optional()
-    .describe("Only search under this folder, e.g. memories"),
-  max_files: z.number().int().min(1).max(50).optional(),
+    .describe("Only search under this folder, e.g. project/quickcart"),
+  max_files: z.number().int().min(1).max(500).optional(),
+  max_results: z.number().int().min(1).max(100).optional(),
 });
+
+/**
+ * Sorts file paths intelligently to prevent alphabetical starvation:
+ * 1. Files whose path directly matches query (instant high-relevance hits)
+ * 2. Active project files (project/**) - grouped and prioritized so all projects are scanned
+ * 3. Core context files (session/**, domains/**, root *.md)
+ * 4. Historical logs (activity-log/**) - scanned last so historical logs never crowd out active project codebases
+ */
+export function prioritizeSearchBlobs<T extends { path: string }>(
+  blobs: T[],
+  query: string
+): T[] {
+  const q = query.toLowerCase();
+  return [...blobs].sort((a, b) => {
+    const aPath = a.path.toLowerCase();
+    const bPath = b.path.toLowerCase();
+
+    // 1. Direct path/filename hit
+    const aMatch = aPath.includes(q);
+    const bMatch = bPath.includes(q);
+    if (aMatch && !bMatch) return -1;
+    if (!aMatch && bMatch) return 1;
+
+    // 2. Project files first
+    const aIsProject = aPath.startsWith("project/");
+    const bIsProject = bPath.startsWith("project/");
+    if (aIsProject && !bIsProject) return -1;
+    if (!aIsProject && bIsProject) return 1;
+
+    // 3. Core session / domain / root files
+    const aIsCore =
+      aPath.startsWith("session/") || aPath.startsWith("domains/") || !aPath.includes("/");
+    const bIsCore =
+      bPath.startsWith("session/") || bPath.startsWith("domains/") || !bPath.includes("/");
+    if (aIsCore && !bIsCore) return -1;
+    if (!aIsCore && bIsCore) return 1;
+
+    // 4. Activity logs last
+    const aIsLog = aPath.startsWith("activity-log/");
+    const bIsLog = bPath.startsWith("activity-log/");
+    if (aIsLog && !bIsLog) return 1;
+    if (!aIsLog && bIsLog) return -1;
+
+    return a.path.localeCompare(b.path);
+  });
+}
 
 async function mapConcurrent<T, R>(
   items: T[],
@@ -346,28 +393,53 @@ export async function toolSearchFiles(
   if (!q) return err("Empty query");
 
   const tree = await listTree(accessToken, args.path_prefix || "");
-  const blobs = tree
-    .filter((t) => t.type === "blob")
-    .slice(0, args.max_files ?? 40);
+  const allBlobs = tree.filter((t) => t.type === "blob");
 
-  const results = await mapConcurrent(blobs, 6, async (b) => {
-    const file = await readFile(accessToken, b.path);
-    if (!file) return null;
-    const lower = file.content.toLowerCase();
-    const idx = lower.indexOf(q);
-    if (idx < 0) return null;
-    const start = Math.max(0, idx - 40);
-    const end = Math.min(file.content.length, idx + q.length + 60);
-    const snippet =
-      (start > 0 ? "…" : "") +
-      file.content.slice(start, end).replace(/\n/g, " ") +
-      (end < file.content.length ? "…" : "");
-    return { path: b.path, snippet };
-  });
+  // Prioritize paths so alphabetical sorting doesn't starve projects after 'A'
+  const prioritized = prioritizeSearchBlobs(allBlobs, q);
 
-  const hits = results.filter(
-    (r): r is { path: string; snippet: string } => r !== null
-  );
+  // Scan limit: default 300 files (up from 40), customizable up to 500
+  const maxScan = args.max_files ?? 300;
+  const maxHits = args.max_results ?? 30;
+  const candidates = prioritized.slice(0, maxScan);
+
+  const hits: Array<{ path: string; snippet: string }> = [];
+
+  // Process in concurrent batches of 10 for speed and early termination
+  const batchSize = 10;
+  for (let i = 0; i < candidates.length; i += batchSize) {
+    if (hits.length >= maxHits) break;
+
+    const batch = candidates.slice(i, i + batchSize);
+    const batchResults = await mapConcurrent(batch, 8, async (b) => {
+      const file = await readFile(accessToken, b.path);
+      if (!file) return null;
+      const lower = file.content.toLowerCase();
+      const idx = lower.indexOf(q);
+      if (idx < 0) {
+        // If query was in the filename itself, return preview of file start
+        if (b.path.toLowerCase().includes(q)) {
+          const preview = file.content.slice(0, 100).replace(/\n/g, " ");
+          return { path: b.path, snippet: preview };
+        }
+        return null;
+      }
+      const start = Math.max(0, idx - 40);
+      const end = Math.min(file.content.length, idx + q.length + 60);
+      const snippet =
+        (start > 0 ? "…" : "") +
+        file.content.slice(start, end).replace(/\n/g, " ") +
+        (end < file.content.length ? "…" : "");
+      return { path: b.path, snippet };
+    });
+
+    for (const r of batchResults) {
+      if (r) {
+        hits.push(r);
+        if (hits.length >= maxHits) break;
+      }
+    }
+  }
 
   if (hits.length === 0) {
     return ok(`No matches for "${args.query}"`, { hits: [], query: args.query });

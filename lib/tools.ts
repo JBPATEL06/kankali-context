@@ -168,7 +168,18 @@ export async function toolSearchContext(
     tags: string[];
   }> = [];
 
-  for (const path of paths.slice(0, 40)) {
+  const prioritized = [...paths].sort((a, b) => {
+    const aLower = a.toLowerCase();
+    const bLower = b.toLowerCase();
+    const aMatch = aLower.includes(q);
+    const bMatch = bLower.includes(q);
+    if (aMatch && !bMatch) return -1;
+    if (!aMatch && bMatch) return 1;
+    return a.localeCompare(b);
+  });
+
+  for (const path of prioritized.slice(0, 200)) {
+    if (hits.length >= 30) break;
     const file = await fetchFileRaw(cfg, path);
     if (!file) continue;
     const parsed = parseMarkdown(file.raw, path, file.sha);

@@ -265,6 +265,12 @@ export async function toolMasterDeletePath(
 export const masterSearchFilesSchema = z.object({
   query: z.string().min(1).describe("Term to search for in filenames and content."),
   target: targetSchema,
+  path_prefix: z
+    .string()
+    .optional()
+    .describe("Only search under this folder, e.g. project/quickcart"),
+  max_files: z.number().int().min(1).max(500).optional(),
+  max_results: z.number().int().min(1).max(100).optional(),
 });
 export async function toolMasterSearchFiles(
   ctx: MasterContext,
@@ -273,12 +279,19 @@ export async function toolMasterSearchFiles(
   const target = args.target || (ctx.driveToken ? "drive" : "git");
   const outputs: string[] = [];
 
+  const subArgs = {
+    query: args.query,
+    path_prefix: args.path_prefix,
+    max_files: args.max_files,
+    max_results: args.max_results,
+  };
+
   if ((target === "drive" || target === "both") && ctx.driveToken) {
-    const dRes = await driveSearchFiles(ctx.driveToken, args);
+    const dRes = await driveSearchFiles(ctx.driveToken, subArgs);
     outputs.push(`[Google Drive Results]:\n${dRes.content.map((c) => c.text).join("\n")}`);
   }
   if ((target === "git" || target === "both") && ctx.gitCfg) {
-    const gRes = await gitSearchFiles(ctx.gitCfg, args);
+    const gRes = await gitSearchFiles(ctx.gitCfg, subArgs);
     outputs.push(`[GitHub Results]:\n${gRes.content.map((c) => c.text).join("\n")}`);
   }
 
