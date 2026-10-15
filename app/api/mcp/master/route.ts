@@ -65,7 +65,9 @@ export const maxDuration = 30;
 function extractApiKey(req: Request): string | null {
   const url = new URL(req.url);
   const queryToken = url.searchParams.get("token") || url.searchParams.get("key");
-  if (queryToken && queryToken.startsWith("km_")) return queryToken.trim();
+  if (queryToken && (queryToken.startsWith("km_") || queryToken.startsWith("kk_"))) {
+    return queryToken.trim();
+  }
 
   const auth = req.headers.get("authorization");
   if (auth?.toLowerCase().startsWith("bearer ")) {
@@ -119,6 +121,9 @@ function isPublicMethod(method: string | undefined): boolean {
 }
 
 async function peekJsonRpcMethod(req: Request): Promise<string | undefined> {
+  if (req.method === "GET") {
+    return "ping";
+  }
   try {
     const body = (await req.clone().json()) as { method?: string };
     return body?.method;
@@ -180,12 +185,6 @@ async function resolveCaller(req: Request): Promise<{
   }
 
   const gitCfg = resolveGithubConfig(user);
-
-  if (!driveToken && !gitCfg) {
-    throw new Error(
-      "Neither Google Drive nor GitHub Storage Vault is connected. Connect at least one vault in Settings."
-    );
-  }
 
   return {
     user,

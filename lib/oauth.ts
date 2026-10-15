@@ -334,7 +334,8 @@ export function issueAccessToken(uid: string, resource: string, scope: string): 
   token_type: string;
   scope: string;
 } {
-  const expires_in = 3600;
+  // 30 days (2,592,000s) to prevent frequent re-authentication prompts in Claude
+  const expires_in = 30 * 24 * 3600;
   const access_token = signJwt(
     {
       sub: uid,
